@@ -28,6 +28,8 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   final GlobalKey<fl.NodeEditorState> _editorKey = GlobalKey();
   BlueprintScript? _loadedScript;
   bool _showLogs = false;
+  // dispose 中禁止使用 ref（Riverpod 3 抛 StateError）——didChangeDependencies 捕获
+  CoordinatePickNotifier? _pickNotifier;
 
   @override
   void initState() {
@@ -59,10 +61,17 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _pickNotifier ??= ref.read(coordinatePickProvider.notifier);
+  }
+
+  @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_onKeyEvent);
-    // 页面销毁时兜底退出拾取（钩子必须卸载）
-    ref.read(coordinatePickProvider.notifier).cancel();
+    // 页面销毁时兜底退出拾取（钩子必须卸载；用捕获引用，Riverpod 3 禁止 dispose 中用 ref，
+    // 否则拾取中切走页签时钩子泄漏——全局左/右/中键被吞 + 应用窗口保持最小化）
+    _pickNotifier?.cancel();
     _controller.dispose();
     super.dispose();
   }

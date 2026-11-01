@@ -38,6 +38,8 @@ const int wmRbuttondown = 0x0204;
 const int wmRbuttonup = 0x0205;
 const int wmMbuttondown = 0x0207;
 const int wmMbuttonup = 0x0208;
+// MSLLHOOKSTRUCT.flags：注入事件标志（SendInput/回放产生的事件带此标志）
+const int llkhfInjected = 0x00000001;
 
 // ---- 常用虚拟键码 ----
 const int vkCancel = 0x03;
@@ -363,8 +365,8 @@ const int acSrcAlpha = 1; // 逐像素 Alpha
 const int swShowNa = 8; // 显示但不激活
 const int swpNoSize = 0x0001;
 const int swpNoActivate = 0x0010;
-const int swpTopmost = 0xFFFF; // HWND_TOPMOST
 const int dibRgbColors = 0;
+const int gwlExStyle = -20;
 
 final class WNDCLASSEXW extends Struct {
   @Uint32() external int cbSize;
@@ -485,6 +487,21 @@ bool destroyLayeredWindow(int hwnd) => _destroyWindow(hwnd) != 0;
 void showWindowNa(int hwnd) => _showWindow(hwnd, swShowNa);
 bool moveWindowPos(int hwnd, int x, int y) =>
     _setWindowPos(hwnd, 0, x, y, 0, 0, swpNoSize | swpNoActivate) != 0;
+
+typedef _GetWindowLongPtrWC = IntPtr Function(IntPtr, Int32);
+typedef _GetWindowLongPtrWDart = int Function(int, int);
+final _getWindowLongPtr = user32Lib
+    .lookupFunction<_GetWindowLongPtrWC, _GetWindowLongPtrWDart>('GetWindowLongPtrW');
+
+/// 窗口属性查询（GWL_EXSTYLE 等；诊断/测试用）
+int getWindowLongPtr(int hwnd, int index) => _getWindowLongPtr(hwnd, index);
+
+typedef _IsWindowC = Int32 Function(IntPtr);
+typedef _IsWindowDart = int Function(int);
+final _isWindow = user32Lib.lookupFunction<_IsWindowC, _IsWindowDart>('IsWindow');
+
+/// 窗口是否仍存在（销毁验证用）
+bool isWindow(int hwnd) => _isWindow(hwnd) != 0;
 
 /// UpdateLayeredWindow：把预乘 BGRA 位图设为窗口内容（32bpp、逐像素 Alpha）。
 /// [pptDst]/[psize] 为新窗口位置/尺寸；[hdcSrc] 已选入 [hbmp]；[pblend] 由 [blendAlpha] 构造。

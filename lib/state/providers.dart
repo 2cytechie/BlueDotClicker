@@ -66,6 +66,30 @@ final screenMarkerProvider = Provider<ScreenMarkerService>(
   (_) => ScreenMarkerService(),
 );
 
+/// 回放互斥：任意回放进行中为 true（录制页立即回放/历史条目回放/编辑页试运行共用）。
+/// 页面局部状态无法覆盖 IndexedStack 跨 tab 与路由栈场景，故提升为应用级。
+class ReplayBusyNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  /// 尝试执行一段回放；已有回放进行中返回 false（调用方 toast）。
+  /// body 内部自行 try/catch 与 UI 状态复位；异常经 finally 保证互斥复位。
+  Future<bool> runGuarded(Future<void> Function() body) async {
+    if (state) return false;
+    state = true;
+    try {
+      await body();
+    } finally {
+      state = false;
+    }
+    return true;
+  }
+}
+
+final replayBusyProvider = NotifierProvider<ReplayBusyNotifier, bool>(
+  ReplayBusyNotifier.new,
+);
+
 /// 录制历史列表（录制页展示、属性面板「执行录制」节点下拉共用；操作后 invalidate 刷新）
 final recordingsProvider = FutureProvider<List<Recording>>(
   (ref) => ref.watch(recordingStorageProvider).list(),

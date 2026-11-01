@@ -61,7 +61,12 @@ final _createDIBSection = _gdi32.lookupFunction<
 /// 公开的 DC 原语（分层窗口创建 DIB 用；captureScreen 走私有绑定不受影响）
 int createCompatibleDC(int hdc) => _createCompatibleDC(hdc);
 void deleteDC(int hdc) => _deleteDC(hdc);
-void deleteObject(int obj) => _deleteObject(obj);
+
+/// 删除 GDI 对象；返回是否成功。
+/// 规范要求：仍选入 DC 的对象须先 SelectObject 恢复旧选再删除
+/// （Win11 对选入中的位图做延迟销毁，但该行为未在文档承诺，勿依赖）。
+bool deleteObject(int obj) => _deleteObject(obj) != 0;
+
 int selectObject(int hdc, int obj) => _selectObject(hdc, obj);
 
 /// 创建 32bpp 自顶向下 DIB；返回 (hbitmap, 像素内存指针)。

@@ -10,12 +10,13 @@ import '../platform/recording.dart'
     show describeAction, replayActions, vkName;
 import '../platform/screen_marker.dart';
 import '../platform/win32/user32.dart' as u32;
+import '../services/script_storage.dart' show RecordingStorage;
 import '../state/providers.dart';
 import 'common.dart';
 
 /// 录制动作编辑页：从历史记录点击名称进入。
 /// 支持修改每个动作参数、删除、上移/下移、追加新动作、试运行（F10 中止）、
-/// 屏幕定位（GDI 置顶图标 + 拖拽改坐标）。所有修改即时保存。
+/// 屏幕定位（分层窗口置顶图标 + 拖拽改坐标）。所有修改即时保存。
 class RecordingEditorPage extends ConsumerStatefulWidget {
   final Recording recording;
   const RecordingEditorPage({super.key, required this.recording});
@@ -34,6 +35,11 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
   int _markerIndex = -1; // 屏幕定位激活的动作（-1 = 无）
   bool _replaying = false;
   Future<void> _saveChain = Future.value(); // 串行化保存，避免乱序覆盖
+
+  // dispose/异步闭包中禁止使用 ref（Riverpod 3 会抛 StateError），
+  // 须在 didChangeDependencies 捕获应用级服务引用
+  ScreenMarkerService? _markerService;
+  RecordingStorage? _storage; // 保存链闭包可能在页面销毁后执行
 
   // ---- 撤销/重做（快照式；参数微调按 1 秒窗口合并为一步）----
   final List<(List<RecordedAction>, List<int>)> _undoStack = [];
@@ -114,8 +120,17 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _markerService ??= ref.read(screenMarkerProvider);
+    _storage ??= ref.read(recordingStorageProvider);
+  }
+
+  @override
   void dispose() {
-    ref.read(screenMarkerProvider).hide();
+    // Riverpod 3 禁止在 dispose 中使用 ref（会抛 StateError 使 hide 不执行，
+    // 屏幕定位图标与全局钩子将残留在屏幕上）——用捕获的引用收尾
+    _markerService?.hide();
     super.dispose();
   }
 
@@ -124,17 +139,28 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  /// 即时保存（串行链避免连续编辑乱序写文件）
+  /// 即时保存（串行链避免连续编辑乱序写文件）。
+  /// 快照与 storage 引用在调用时同步捕获——闭包可能在页面 dispose 之后执行，
+  /// 那时使用 ref 会抛 StateError，导致退出前的最后一次编辑丢失。
   void _save() {
-    _saveChain = _saveChain.then((_) async {
-      await ref.read(recordingStorageProvider).save(Recording(
-            id: widget.recording.id,
-            name: _name,
-            createdAt: widget.recording.createdAt,
-            actions: List.of(_actions),
-          ));
-      ref.invalidate(recordingsProvider);
-    });
+    final storage = _storage;
+    if (storage == null) return; // 理论不可达（didChangeDependencies 先于任何交互）
+    final recording = Recording(
+      id: widget.recording.id,
+      name: _name,
+      createdAt: widget.recording.createdAt,
+      actions: List.of(_actions),
+    );
+    _saveChain = _saveChain
+        .then((_) async {
+          await storage.save(recording);
+          // 页面已销毁时不再 invalidate：列表刷新由录制页 _openEditor 返回时兜底
+          if (mounted) ref.invalidate(recordingsProvider);
+        })
+        .catchError((e, st) {
+          // 单次失败（如磁盘错误）不拖垮后续保存链
+          debugPrint('保存录制失败: $e\n$st');
+        });
   }
 
   void _updateAction(int index, RecordedAction action) {
@@ -266,22 +292,34 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
       _toast('没有可回放的动作');
       return;
     }
-    ref.read(screenMarkerProvider).hide();
-    setState(() {
-      _replaying = true;
-      _markerIndex = -1;
-    });
-    try {
-      await replayActions(
-        automation,
-        List.of(_actions), // 快照：回放中编辑不影响本轮
-      );
-      _toast('回放完成');
-    } catch (e) {
-      _toast('回放中断：$e');
-    } finally {
-      if (mounted) setState(() => _replaying = false);
+    if (ref.read(replayBusyProvider)) {
+      _toast('已有回放进行中');
+      return;
     }
+    if (ref.read(recordingServiceProvider).isRecording) {
+      // 录制在后台运行时试运行，会把回放动作录进进行中的录制
+      _toast('录制进行中，无法回放');
+      return;
+    }
+    ref.read(screenMarkerProvider).hide();
+    final ok = await ref.read(replayBusyProvider.notifier).runGuarded(() async {
+      setState(() {
+        _replaying = true;
+        _markerIndex = -1;
+      });
+      try {
+        await replayActions(
+          automation,
+          List.of(_actions), // 快照：回放中编辑不影响本轮
+        );
+        _toast('回放完成');
+      } catch (e) {
+        _toast('回放中断：$e');
+      } finally {
+        if (mounted) setState(() => _replaying = false);
+      }
+    });
+    if (!ok && mounted) _toast('已有回放进行中');
   }
 
   // ---- 键盘快捷键（方向键微调坐标 / Delete 删除；焦点在输入框时不触发）----
@@ -343,6 +381,8 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
   }
 
   void _toggleMarker(int index) {
+    // 回放中禁用：标记的 LL 钩子会吞掉回放注入到标记坐标的点击
+    if (ref.read(replayBusyProvider)) return;
     if (_markerIndex == index) {
       _hideMarker();
       setState(() {});
@@ -792,6 +832,7 @@ class _ActionTile extends StatelessWidget {
                 action: action,
                 hasCoordinate: hasCoordinate,
                 marking: marking,
+                replaying: replaying,
                 onUpdate: onUpdate,
                 onToggleMarker: onToggleMarker,
               ),
@@ -826,6 +867,7 @@ class _EditPanel extends StatelessWidget {
   final RecordedAction action;
   final bool hasCoordinate;
   final bool marking;
+  final bool replaying;
   final ValueChanged<RecordedAction> onUpdate;
   final VoidCallback onToggleMarker;
 
@@ -833,6 +875,7 @@ class _EditPanel extends StatelessWidget {
     required this.action,
     required this.hasCoordinate,
     required this.marking,
+    required this.replaying,
     required this.onUpdate,
     required this.onToggleMarker,
   });
@@ -878,12 +921,16 @@ class _EditPanel extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               ),
-              onPressed: onToggleMarker,
+              onPressed: replaying ? null : onToggleMarker,
               icon: Icon(
                 marking ? Icons.location_on_rounded : Icons.location_on_outlined,
                 size: 16,
               ),
-              label: Text(marking ? '屏幕定位中 · 拖拽图标改坐标' : '屏幕定位'),
+              label: Text(replaying
+                  ? '回放中 · 屏幕定位不可用'
+                  : marking
+                      ? '屏幕定位中 · 拖拽图标改坐标'
+                      : '屏幕定位'),
             ),
           ],
         ],

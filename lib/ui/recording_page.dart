@@ -24,7 +24,6 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
   StreamSubscription<RecordedAction>? _sub;
   int _liveCount = 0; // 录制中实时捕获的动作数
   Recording? _lastRecording; // 最近一次停止后的录制结果
-  bool _replaying = false;
 
   @override
   void initState() {
@@ -53,6 +52,10 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
       _toast(automation.unsupportedReason ?? '当前平台暂不支持录制');
       return;
     }
+    if (ref.read(replayBusyProvider)) {
+      _toast('回放进行中，无法开始录制');
+      return;
+    }
     final service = ref.read(recordingServiceProvider);
     service.start();
     setState(() {
@@ -62,7 +65,7 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
     _toast('录制已开始，请切换到目标窗口进行操作');
   }
 
-  /// 停止录制并弹出命名对话框后保存
+  /// 停止录制并弹出命名对话框后保存；点「取消」则放弃本次录制
   Future<void> _stopRecording() async {
     final service = ref.read(recordingServiceProvider);
     final actions = service.stop();
@@ -71,6 +74,16 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
     final defaultName =
         '录制 ${two(now.hour)}:${two(now.minute)}:${two(now.second)}';
     final name = await _promptName(initial: defaultName, title: '保存录制');
+    if (name == null) {
+      // 用户点「取消」：放弃本次录制，不保存
+      if (!mounted) return;
+      _toast('已放弃本次录制');
+      setState(() {
+        _lastRecording = null;
+        _liveCount = 0;
+      });
+      return;
+    }
     final r = Recording(
       id: 'r_${now.millisecondsSinceEpoch}',
       name: name.isEmpty ? defaultName : name,
@@ -86,8 +99,9 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
     ref.invalidate(recordingsProvider);
   }
 
-  /// 命名输入对话框；返回输入的名称（取消/留空返回空串，由调用方使用默认名）
-  Future<String> _promptName({
+  /// 命名输入对话框；返回输入的名称（留空由调用方使用默认名），
+  /// 点「取消」返回 null（调用方放弃本次录制）。
+  Future<String?> _promptName({
     required String initial,
     required String title,
   }) async {
@@ -104,7 +118,7 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, ''),
+            onPressed: () => Navigator.pop(ctx), // 取消 = 放弃（返回 null）
             child: const Text('取消'),
           ),
           FilledButton(
@@ -114,26 +128,36 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
         ],
       ),
     );
-    return (result ?? '').trim();
+    if (result == null) return null;
+    return result.trim();
   }
 
-  /// 回放动作序列（按录制时的偏移间隔执行；F10 随时中止）
+  /// 回放动作序列（按录制时的偏移间隔执行；F10 随时中止；与其他回放互斥）
   Future<void> _replay(List<RecordedAction> actions) async {
     final automation = ref.read(automationProvider);
     if (!automation.isSupported) {
       _toast(automation.unsupportedReason ?? '当前平台暂不支持回放');
       return;
     }
-    if (_replaying || actions.isEmpty) return;
-    setState(() => _replaying = true);
-    try {
-      await replayActions(automation, actions);
-      _toast('回放完成');
-    } catch (e) {
-      _toast('回放中断：$e');
-    } finally {
-      if (mounted) setState(() => _replaying = false);
+    if (actions.isEmpty) return;
+    if (ref.read(replayBusyProvider)) {
+      _toast('已有回放进行中');
+      return;
     }
+    if (ref.read(recordingServiceProvider).isRecording) {
+      // 否则会把回放动作录进进行中的录制
+      _toast('录制进行中，无法回放');
+      return;
+    }
+    final ok = await ref.read(replayBusyProvider.notifier).runGuarded(() async {
+      try {
+        await replayActions(automation, actions);
+        _toast('回放完成');
+      } catch (e) {
+        _toast('回放中断：$e');
+      }
+    });
+    if (!ok && mounted) _toast('已有回放进行中');
   }
 
   String _actionLabel(RecordedAction a) => describeAction(a);
@@ -142,6 +166,8 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
   Widget build(BuildContext context) {
     final service = ref.read(recordingServiceProvider);
     final recording = service.isRecording;
+    // 应用级回放互斥：历史条目回放同样驱动徽章与按钮禁用
+    final replaying = ref.watch(replayBusyProvider);
 
     // 左侧：录制操作 + 最近预览
     final leftCards = <Widget>[
@@ -175,7 +201,7 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
                     label: const Text('停止录制'),
                   )
                 : FilledButton.icon(
-                    onPressed: _replaying ? null : _startRecording,
+                    onPressed: replaying ? null : _startRecording,
                     icon: const Icon(Icons.fiber_manual_record_rounded),
                     label: const Text('开始录制'),
                   ),
@@ -204,7 +230,7 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
                 children: [
                   Expanded(
                     child: FilledButton.icon(
-                      onPressed: _replaying
+                      onPressed: replaying
                           ? null
                           : () => _replay(_lastRecording!.actions),
                       icon: const Icon(Icons.play_arrow_rounded, size: 18),
@@ -228,7 +254,7 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
             PageHeader(
               title: '录制与回放',
               trailing: [
-                if (_replaying)
+                if (replaying)
                   const StatusBadge(
                     text: '回放中 · F10 中止',
                     color: AppColors.nodeLogic,
@@ -469,6 +495,7 @@ class _HistoryTileState extends ConsumerState<_HistoryTile> {
   @override
   Widget build(BuildContext context) {
     final r = recording;
+    final replaying = ref.watch(replayBusyProvider); // 回放互斥驱动按钮禁用
     return Column(
       children: [
         Padding(
@@ -531,7 +558,7 @@ class _HistoryTileState extends ConsumerState<_HistoryTile> {
               _btn(
                 Icons.play_arrow_rounded,
                 '回放',
-                () => _replayRecording(context, ref),
+                replaying ? null : () => _replayRecording(context, ref),
                 color: AppColors.peacock,
               ),
               _btn(
@@ -631,13 +658,25 @@ class _HistoryTileState extends ConsumerState<_HistoryTile> {
       _toast(context, automation.unsupportedReason ?? '当前平台暂不支持回放');
       return;
     }
-    // 回放为耗时操作，逐个执行动作（间隔按录制偏移差；F10 随时中止）
-    try {
-      await replayActions(automation, recording.actions);
-      if (context.mounted) _toast(context, '回放完成');
-    } catch (e) {
-      if (context.mounted) _toast(context, '回放中断：$e');
+    if (ref.read(replayBusyProvider)) {
+      _toast(context, '已有回放进行中');
+      return;
     }
+    if (ref.read(recordingServiceProvider).isRecording) {
+      // 否则会把回放动作录进进行中的录制
+      _toast(context, '录制进行中，无法回放');
+      return;
+    }
+    // 回放为耗时操作，逐个执行动作（间隔按录制偏移差；F10 随时中止）
+    final ok = await ref.read(replayBusyProvider.notifier).runGuarded(() async {
+      try {
+        await replayActions(automation, recording.actions);
+        if (context.mounted) _toast(context, '回放完成');
+      } catch (e) {
+        if (context.mounted) _toast(context, '回放中断：$e');
+      }
+    });
+    if (!ok && context.mounted) _toast(context, '已有回放进行中');
   }
 
   Future<void> _delete(BuildContext context, WidgetRef ref) async {
