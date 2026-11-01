@@ -23,7 +23,7 @@ class RecordingPage extends ConsumerStatefulWidget {
 class _RecordingPageState extends ConsumerState<RecordingPage> {
   StreamSubscription<RecordedAction>? _sub;
   int _liveCount = 0; // 录制中实时捕获的动作数
-  Recording? _lastRecording; // 最近一次停止后的录制结果
+  Recording? _previewRecording; // 左侧预览的录制：录制完成自动置入，也可从历史图标点入
 
   @override
   void initState() {
@@ -60,7 +60,7 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
     service.start();
     setState(() {
       _liveCount = 0;
-      _lastRecording = null;
+      _previewRecording = null;
     });
     _toast('录制已开始，请切换到目标窗口进行操作');
   }
@@ -79,7 +79,7 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
       if (!mounted) return;
       _toast('已放弃本次录制');
       setState(() {
-        _lastRecording = null;
+        _previewRecording = null;
         _liveCount = 0;
       });
       return;
@@ -93,10 +93,17 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
     await ref.read(recordingStorageProvider).save(r);
     if (!mounted) return;
     setState(() {
-      _lastRecording = r;
+      _previewRecording = r;
       _liveCount = 0;
     });
     ref.invalidate(recordingsProvider);
+  }
+
+  /// 历史图标点击：在左侧「新建录制」下方预览该录制的动作；再点一次收起
+  void _showPreview(Recording r) {
+    setState(() {
+      _previewRecording = _previewRecording?.id == r.id ? null : r;
+    });
   }
 
   /// 命名输入对话框；返回输入的名称（留空由调用方使用默认名），
@@ -208,37 +215,37 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
           ],
         ),
       ),
-      // ---- 最近录制预览 ----
-      if (_lastRecording != null) ...[
+      // ---- 动作预览（录制完成自动置入；也可从历史记录图标点入） ----
+      if (_previewRecording != null) ...[
         const SizedBox(height: 14),
         SectionCard(
-          title: '「${_lastRecording!.name}」动作预览',
+          title: '「${_previewRecording!.name}」动作预览',
           icon: Icons.list_alt_rounded,
+          // 立即回放按钮：放在「动作预览」标题文字右侧
+          trailing: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+            ),
+            onPressed: replaying
+                ? null
+                : () {
+                    final r = _previewRecording;
+                    if (r != null) _replay(r.actions);
+                  },
+            icon: const Icon(Icons.play_arrow_rounded, size: 18),
+            label: const Text('立即回放'),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (var i = 0; i < _lastRecording!.actions.length; i++)
+              for (var i = 0; i < _previewRecording!.actions.length; i++)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: Text(
-                    '${i + 1}. [+${_lastRecording!.actions[i].offsetMs}ms] ${_actionLabel(_lastRecording!.actions[i])}',
+                    '${i + 1}. [+${_previewRecording!.actions[i].offsetMs}ms] ${_actionLabel(_previewRecording!.actions[i])}',
                     style: const TextStyle(fontSize: 13, color: AppColors.ink),
                   ),
                 ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: replaying
-                          ? null
-                          : () => _replay(_lastRecording!.actions),
-                      icon: const Icon(Icons.play_arrow_rounded, size: 18),
-                      label: const Text('立即回放'),
-                    ),
-                  ),
-                ],
-              ),
             ],
           ),
         ),
@@ -277,7 +284,12 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
                           ),
                         ),
                         const SizedBox(width: 16),
-                        Expanded(child: _HistoryPane()),
+                        Expanded(
+                          child: _HistoryPane(
+                            onPreview: _showPreview,
+                            selectedId: _previewRecording?.id,
+                          ),
+                        ),
                       ],
                     );
                   }
@@ -287,7 +299,11 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
                     children: [
                       ...leftCards,
                       const SizedBox(height: 14),
-                      _HistoryPane(asCard: true),
+                      _HistoryPane(
+                        asCard: true,
+                        onPreview: _showPreview,
+                        selectedId: _previewRecording?.id,
+                      ),
                     ],
                   );
                 },
@@ -304,7 +320,13 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
 class _HistoryPane extends ConsumerWidget {
   final bool asCard;
 
-  const _HistoryPane({this.asCard = false});
+  /// 点击条目图标：在左侧「新建录制」下方预览该录制的动作
+  final void Function(Recording recording)? onPreview;
+
+  /// 当前正在左侧预览的录制 id（对应条目图标高亮）
+  final String? selectedId;
+
+  const _HistoryPane({this.asCard = false, this.onPreview, this.selectedId});
 
   /// 从 JSON 文件导入录制
   Future<void> _importRecording(BuildContext context, WidgetRef ref) async {
@@ -363,6 +385,8 @@ class _HistoryPane extends ConsumerWidget {
                 key: ValueKey(r.id),
                 recording: r,
                 isLast: r == items.last,
+                onPreview: onPreview == null ? null : () => onPreview!(r),
+                previewing: r.id == selectedId,
               ),
           ],
         );
@@ -422,10 +446,18 @@ class _HistoryTile extends ConsumerStatefulWidget {
   final Recording recording;
   final bool isLast;
 
+  /// 点击图标：在左侧预览动作（null = 不支持预览）
+  final VoidCallback? onPreview;
+
+  /// 该录制正在左侧预览中（图标高亮实心）
+  final bool previewing;
+
   const _HistoryTile({
     super.key,
     required this.recording,
     required this.isLast,
+    this.onPreview,
+    this.previewing = false,
   });
 
   @override
@@ -436,6 +468,8 @@ class _HistoryTileState extends ConsumerState<_HistoryTile> {
   bool _expanded = false;
 
   Recording get recording => widget.recording;
+  VoidCallback? get onPreview => widget.onPreview;
+  bool get previewing => widget.previewing;
 
   void _toast(BuildContext context, String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
@@ -502,10 +536,30 @@ class _HistoryTileState extends ConsumerState<_HistoryTile> {
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: Row(
             children: [
-              const Icon(
-                Icons.videocam_outlined,
-                size: 20,
-                color: AppColors.peacock,
+              // 录像图标：点击在左侧「新建录制」下方预览动作，再点收起
+              Tooltip(
+                message: previewing ? '收起预览' : '预览动作（左侧展示）',
+                child: SizedBox(
+                  width: 30,
+                  height: 30,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 30,
+                      minHeight: 30,
+                    ),
+                    icon: Icon(
+                      previewing
+                          ? Icons.videocam_rounded
+                          : Icons.videocam_outlined,
+                      size: 20,
+                    ),
+                    color: previewing
+                        ? AppColors.nodeLogic
+                        : AppColors.peacock,
+                    onPressed: onPreview,
+                  ),
+                ),
               ),
               const SizedBox(width: 10),
               Expanded(
