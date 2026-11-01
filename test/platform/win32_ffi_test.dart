@@ -54,4 +54,26 @@ void main() {
       expect(u32.isKeyDown(u32.vkF10), isA<bool>());
       expect(const WindowsAutomation().isKeyDown(u32.vkF10), isA<bool>());
     });
+
+    group('clampRegionToScreen 区域钳制（越界不崩溃）', () {
+      test('正常区域原样通过', () {
+        expect(gdi.clampRegionToScreen(10, 20, 100, 80, 1920, 1080), (10, 20, 100, 80));
+      });
+
+      test('起点越出屏幕：钳到边缘并取 1 像素，不抛 ArgumentError', () {
+        // 修复前：w.clamp(1, sw - x) 在 x>=sw 时因上界为负抛错，截屏整个报废
+        expect(gdi.clampRegionToScreen(5000, 5000, 50, 50, 1920, 1080), (1919, 1079, 1, 1));
+      });
+
+      test('负起点与超大宽高：钳到屏幕内', () {
+        expect(gdi.clampRegionToScreen(-20, -20, 5000, 5000, 1920, 1080), (0, 0, 1920, 1080));
+      });
+    });
+
+    test('GDI 越界区域截屏不抛异常（区域被钳制）', () {
+      final cap = gdi.captureScreen(region: const RectPx(5000, 5000, 100, 100));
+      expect(cap.width, 1);
+      expect(cap.height, 1);
+      expect(cap.bgra.length, 4);
+    });
 }

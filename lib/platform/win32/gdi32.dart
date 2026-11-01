@@ -1,7 +1,7 @@
 import 'dart:ffi';
-import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../platform/platform_automation.dart';
 import 'user32.dart' as u32;
@@ -88,17 +88,25 @@ int selectObject(int hdc, int obj) => _selectObject(hdc, obj);
   return (hbm, bits);
 }
 
+/// 区域参数钳制到屏幕内（负值/越界安全）。
+/// 直接 clamp 会在 x≥屏宽时因 `clamp(1, 负数)` 抛 ArgumentError，先钳起点再钳宽高。
+@visibleForTesting
+(int, int, int, int) clampRegionToScreen(int x, int y, int w, int h, int sw, int sh) {
+  final cx = x.clamp(0, sw - 1);
+  final cy = y.clamp(0, sh - 1);
+  return (cx, cy, w.clamp(1, sw - cx), h.clamp(1, sh - cy));
+}
+
 /// 截取屏幕指定区域（物理像素），返回 BGRA 自顶向下像素。
 /// [region] 为空时截取全屏。
 ScreenCapture captureScreen({RectPx? region}) {
   final sw = u32.screenW();
   final sh = u32.screenH();
-  final x = region?.x ?? 0;
-  final y = region?.y ?? 0;
-  final w = region?.w ?? sw;
-  final h = region?.h ?? sh;
-  final cw = w.clamp(1, sw - x);
-  final ch = h.clamp(1, sh - y);
+  final (x, y, w, h) = region == null
+      ? (0, 0, sw, sh)
+      : clampRegionToScreen(region.x, region.y, region.w, region.h, sw, sh);
+  final cw = w;
+  final ch = h;
 
   final hdcScreen = _getDC(0);
   final hdcMem = _createCompatibleDC(hdcScreen);

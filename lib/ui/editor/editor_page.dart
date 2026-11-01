@@ -35,6 +35,8 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   void initState() {
     super.initState();
     _controller = fl.NodeEditorController(definitions: blueprintNodeRegistry);
+    // 执行流输出口单出边约束（引擎只走首条执行流边，多条会被静默忽略）
+    _controller.connectionValidator = blueprintConnectionValidator;
     // Ctrl+S 保存：编辑界面挂载期间监听（不依赖具体控件的焦点）
     HardwareKeyboard.instance.addHandler(_onKeyEvent);
     // 打开脚本 → 载入图（不同实例才载入，避免编辑引起的刷新重置画布）
@@ -92,7 +94,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     }
   }
 
-  /// 从编辑器图模型转回脚本（所见即所得）
+  /// 从编辑器图模型转回脚本（所见即所得；variables 由脚本承载，graph 不含）
   BlueprintScript? _currentAsScript() {
     final loaded = _loadedScript;
     if (loaded == null) return null;
@@ -100,6 +102,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
       _controller.graph,
       name: loaded.name,
       createdAt: loaded.createdAt,
+      variables: Map.of(loaded.variables),
     );
   }
 
@@ -107,13 +110,18 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   Future<bool> _save() async {
     final script = _currentAsScript();
     if (script == null) return false;
+    final graphAtSave = _controller.graph; // 保存时刻的图快照（identity）
     try {
       await ref.read(scriptStorageProvider).save(script);
       // 先登记已载入实例、再同步 provider：否则会被误判为「切换到另一个脚本」
       // 而重建整张画布（撤销历史与相机位置都会丢失）
       _loadedScript = script;
       ref.read(currentScriptProvider.notifier).open(script);
-      _controller.project.markSaved();
+      // 落盘期间图若被编辑（异步写入窗口），不得标净——脏标记保留，
+      // 离开编辑器时仍会提示保存，防止新编辑丢失
+      if (identical(_controller.graph, graphAtSave)) {
+        _controller.project.markSaved();
+      }
       // 刷新首页列表：列表缓存的是打开时的旧对象，不刷新会导致再次编辑载入旧内容
       await ref.read(scriptListProvider.notifier).refresh();
       if (mounted) {
@@ -245,8 +253,9 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   @override
   Widget build(BuildContext context) {
     final script = ref.watch(currentScriptProvider);
-    final runner = ref.watch(runnerProvider);
-    final runningNodeId = runner.currentNodeId;
+    // select 拆分：日志每步追加，若整页 watch 会在运行中导致整页（含画布）每条日志重建
+    final running = ref.watch(runnerProvider.select((s) => s.running));
+    final runningNodeId = ref.watch(runnerProvider.select((s) => s.currentNodeId));
     final currentNodeTitle = () {
       if (runningNodeId == null || _loadedScript == null) return '…';
       final n = _controller.graph.nodes[runningNodeId];
@@ -256,7 +265,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     return Scaffold(
       body: Column(
         children: [
-          _buildToolbar(script, runner, currentNodeTitle),
+          _buildToolbar(script, running, currentNodeTitle),
           const Divider(height: 1),
           Expanded(
             child: _loadedScript == null
@@ -341,7 +350,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
 
   Widget _buildToolbar(
     BlueprintScript? script,
-    RunnerState runner,
+    bool running,
     String currentNodeTitle,
   ) {
     return Container(
@@ -404,7 +413,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
                 : const SizedBox.shrink(),
           ),
           // 运行中显示当前节点指示
-          if (runner.running)
+          if (running)
             Container(
               margin: const EdgeInsets.only(right: 8),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -435,7 +444,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
                 ],
               ),
             ),
-          runner.running
+          running
               ? FilledButton.icon(
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.danger,

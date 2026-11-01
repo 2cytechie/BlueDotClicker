@@ -442,4 +442,40 @@ void main() {
       expect(hooks.logs.join(), contains('平台不支持'));
     });
   });
+
+  group('区域裁剪安全（越界不崩溃）', () {
+    // 构造 w×h 纯色图：每 4 字节一个像素（BGRA）
+    RawImage img(int w, int h) =>
+        RawImage(w, h, Uint8List(w * h * 4));
+
+    test('正常区域裁剪保持内容与尺寸', () {
+      final src = RawImage(100, 100, Uint8List.fromList(
+          List.filled(100 * 100 * 4, 7, growable: false)));
+      final out = BlueprintInterpreter.cropImage(src, const RectPx(10, 20, 30, 40));
+      expect(out.width, 30);
+      expect(out.height, 40);
+      expect(out.bgra.length, 30 * 40 * 4);
+    });
+
+    test('区域起点越出图像：钳制到边缘，1×1 不抛 ArgumentError', () {
+      final src = img(100, 100);
+      final out = BlueprintInterpreter.cropImage(src, const RectPx(150, 150, 10, 10));
+      expect(out.width, 1);
+      expect(out.height, 1);
+    });
+
+    test('负起点与超大宽高：钳到图像内', () {
+      final src = img(100, 100);
+      final out = BlueprintInterpreter.cropImage(src, const RectPx(-20, -20, 500, 500));
+      expect(out.width, 100);
+      expect(out.height, 100);
+    });
+
+    test('部分越界：只保留与图像相交的部分', () {
+      final src = img(100, 100);
+      final out = BlueprintInterpreter.cropImage(src, const RectPx(80, 90, 50, 50));
+      expect(out.width, 20);
+      expect(out.height, 10);
+    });
+  });
 }

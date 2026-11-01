@@ -113,8 +113,8 @@ class ScriptListNotifier extends AsyncNotifier<List<BlueprintScript>> {
   Future<List<BlueprintScript>> build() async =>
       ref.watch(scriptStorageProvider).listScripts();
 
+  /// 刷新时不置 AsyncLoading：保留旧数据直到新数据到达，避免每次保存后列表闪转圈
   Future<void> refresh() async {
-    state = const AsyncLoading();
     state = await AsyncValue.guard(
       () => ref.read(scriptStorageProvider).listScripts(),
     );
@@ -134,92 +134,11 @@ class CurrentScriptNotifier extends Notifier<BlueprintScript?> {
 
   void open(BlueprintScript s) => state = s;
   void close() => state = null;
-
-  void _touch() {
-    final s = state;
-    if (s != null) {
-      ref
-          .read(scriptStorageProvider)
-          .save(s)
-          .then((_) => ref.read(scriptListProvider.notifier).refresh());
-    }
-  }
-
-  void updateNodePosition(String nodeId, double x, double y) {
-    state?.nodes[nodeId]
-      ?..x = x
-      ..y = y;
-  }
-
-  void addNode(BPNode node) {
-    state?.nodes[node.id] = node;
-    _touch();
-    state = state?.copy() ?? state;
-    if (state != null) ref.read(selectedNodeProvider.notifier).select(node.id);
-  }
-
-  void updateNodeParams(String nodeId, String key, Object value) {
-    state?.nodes[nodeId]?.params[key] = value;
-    state = state?.copy() ?? state;
-  }
-
-  void removeNode(String nodeId) {
-    state?.removeNode(nodeId);
-    ref.read(selectedNodeProvider.notifier).select(null);
-    state = state?.copy() ?? state;
-  }
-
-  void addEdge(BPEdge edge) {
-    final s = state;
-    if (s == null) return;
-    // 执行流输出口只允许一条出边
-    if (edge.kind == EdgeKind.exec) {
-      s.edges.removeWhere(
-        (k, e) => e.from == edge.from && e.kind == EdgeKind.exec,
-      );
-    }
-    // 输入端口只允许一条入边
-    s.edges.removeWhere((k, e) => e.to == edge.to);
-    s.edges[edge.id] = edge;
-    _touch();
-    state = s.copy();
-  }
-
-  void removeEdge(String edgeId) {
-    state?.edges.remove(edgeId);
-    state = state?.copy() ?? state;
-  }
 }
 
 final currentScriptProvider =
     NotifierProvider<CurrentScriptNotifier, BlueprintScript?>(
       CurrentScriptNotifier.new,
-    );
-
-// ---- 编辑器交互状态 ----
-
-class SelectedNodeNotifier extends Notifier<String?> {
-  @override
-  String? build() => null;
-  void select(String? id) => state = id;
-}
-
-final selectedNodeProvider = NotifierProvider<SelectedNodeNotifier, String?>(
-  SelectedNodeNotifier.new,
-);
-
-/// 正在拖拽的连线起点（输出口），拖到目标输入口松手完成连线
-class PendingConnectionNotifier extends Notifier<PortRef?> {
-  @override
-  PortRef? build() => null;
-  void begin(PortRef from) => state = from;
-  void cancel() => state = null;
-  bool get isActive => state != null;
-}
-
-final pendingConnectionProvider =
-    NotifierProvider<PendingConnectionNotifier, PortRef?>(
-      PendingConnectionNotifier.new,
     );
 
 // ---- 全局坐标拾取 ----
@@ -298,8 +217,12 @@ class CoordinatePickNotifier extends Notifier<CoordinatePickState> {
     _set(const CoordinatePickState());
   }
 
-  /// UI 主动取消
+  /// UI 主动取消。
+  /// provider 已销毁时为 no-op：EditorPage.dispose 会兜底调用本方法，
+  /// 而 cancel 内部经 [_picker] 使用 ref——dispose/销毁阶段再用 ref 会抛
+  /// UnmountedRefException，须以 _alive 守卫。
   void cancel() {
+    if (!_alive) return;
     _picker.cancel();
     _set(const CoordinatePickState());
   }

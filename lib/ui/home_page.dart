@@ -112,17 +112,24 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  /// 新建脚本：输入名称 → 创建含开始节点的脚本 → 保存 → 进编辑器
+  /// 新建脚本：输入名称 → 查重 → 创建含开始节点的脚本 → 保存 → 进编辑器
   Future<void> _createScript(BuildContext context, WidgetRef ref) async {
     final name = await _promptName(context, title: '新建脚本', hint: '输入脚本名称');
     if (name == null || !context.mounted) return;
-    final s = BlueprintScript(name: name);
-    final notifier = ref.read(currentScriptProvider.notifier);
-    notifier.open(s);
-    notifier.addNode(BPNode(id: 'n_start', type: 'start', x: 80, y: 80));
-    await ref.read(scriptStorageProvider).save(s);
+    final storage = ref.read(scriptStorageProvider);
+    if (await storage.exists(name)) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已存在同名脚本，请换一个名称')),
+      );
+      return;
+    }
+    final s = BlueprintScript(name: name)
+      ..nodes['n_start'] = BPNode(id: 'n_start', type: 'start', x: 80, y: 80);
+    await storage.save(s);
     await ref.read(scriptListProvider.notifier).refresh();
     if (!context.mounted) return;
+    ref.read(currentScriptProvider.notifier).open(s);
     ref.read(appNavProvider.notifier).go(AppTab.editor);
   }
 
@@ -156,31 +163,61 @@ class HomePage extends ConsumerWidget {
     String? initial,
     String? hint,
   }) async {
-    final controller = TextEditingController(text: initial ?? '');
     final result = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: InputDecoration(hintText: hint, labelText: '名称'),
-          onSubmitted: (v) => Navigator.pop(ctx, v),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
+      builder: (_) => _NameDialog(title: title, initial: initial, hint: hint),
     );
-    controller.dispose();
     return (result == null || result.isEmpty) ? null : result;
+  }
+}
+
+/// 名称输入对话框。
+/// controller 生命周期跟随对话框元素：showDialog 的 future 在 pop 时即完成，
+/// 而对话框 pop 动画仍在播放——若此时 dispose controller，动画帧中 TextField
+/// 仍会访问已销毁的 controller 并抛断言。State.dispose（元素卸载）才是正确时机。
+class _NameDialog extends StatefulWidget {
+  const _NameDialog({required this.title, this.initial, this.hint});
+
+  final String title;
+  final String? initial;
+  final String? hint;
+
+  @override
+  State<_NameDialog> createState() => _NameDialogState();
+}
+
+class _NameDialogState extends State<_NameDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initial ?? '',
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(hintText: widget.hint, labelText: '名称'),
+        onSubmitted: (v) => Navigator.pop(context, v),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: const Text('确定'),
+        ),
+      ],
+    );
   }
 }
 
@@ -459,7 +496,6 @@ class _ScriptRow extends ConsumerWidget {
   }
 
   void _openEditor(BuildContext context, WidgetRef ref) {
-    ref.read(selectedNodeProvider.notifier).select(null);
     ref.read(currentScriptProvider.notifier).open(script);
     ref.read(appNavProvider.notifier).go(AppTab.editor);
   }
@@ -467,8 +503,24 @@ class _ScriptRow extends ConsumerWidget {
   Future<void> _rename(BuildContext context, WidgetRef ref) async {
     final name = await _prompt(context, title: '重命名脚本', initial: script.name);
     if (name == null) return;
-    await ref.read(scriptStorageProvider).rename(script, name);
+    // 重命名为已有名会静默覆盖另一脚本的磁盘文件，必须在落盘前拦截
+    final storage = ref.read(scriptStorageProvider);
+    if (name != script.name && await storage.exists(name)) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已存在同名脚本，请换一个名称')),
+        );
+      }
+      return;
+    }
+    final cur = ref.read(currentScriptProvider);
+    await storage.rename(script, name);
     await ref.read(scriptListProvider.notifier).refresh();
+    // 重命名/删除影响的是 currentScript 指向的旧对象；不关闭的话，
+    // 侧边栏「蓝图」会载入旧名对象并可能把已删脚本"复活"回磁盘
+    if (cur != null && cur.name == script.name) {
+      ref.read(currentScriptProvider.notifier).close();
+    }
   }
 
   Future<void> _duplicate(BuildContext context, WidgetRef ref) async {
@@ -520,8 +572,13 @@ class _ScriptRow extends ConsumerWidget {
       ),
     );
     if (ok != true) return;
+    final cur = ref.read(currentScriptProvider);
     await ref.read(scriptStorageProvider).delete(script.name);
     await ref.read(scriptListProvider.notifier).refresh();
+    // 删除当前打开的脚本后关闭引用，避免侧边栏「蓝图」把已删脚本"复活"
+    if (cur != null && cur.name == script.name) {
+      ref.read(currentScriptProvider.notifier).close();
+    }
   }
 }
 
@@ -536,29 +593,9 @@ Future<String?> _prompt(
   required String title,
   String? initial,
 }) async {
-  final controller = TextEditingController(text: initial ?? '');
   final result = await showDialog<String>(
     context: context,
-    builder: (ctx) => AlertDialog(
-      title: Text(title),
-      content: TextField(
-        controller: controller,
-        autofocus: true,
-        decoration: const InputDecoration(labelText: '名称'),
-        onSubmitted: (v) => Navigator.pop(ctx, v),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-          child: const Text('确定'),
-        ),
-      ],
-    ),
+    builder: (_) => _NameDialog(title: title, initial: initial),
   );
-  controller.dispose();
   return (result == null || result.isEmpty) ? null : result;
 }

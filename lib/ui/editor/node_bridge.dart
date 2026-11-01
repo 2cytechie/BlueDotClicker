@@ -91,9 +91,19 @@ fl.NodeGraph blueprintToGraph(BlueprintScript script) => fl.NodeGraph(
       ],
     );
 
-/// 编辑器图模型 → BlueprintScript（保存/运行前调用）
-BlueprintScript graphToBlueprint(fl.NodeGraph graph, {required String name, DateTime? createdAt}) {
-  final script = BlueprintScript(name: name, createdAt: createdAt);
+/// 编辑器图模型 → BlueprintScript（保存/运行前调用）。
+/// [variables] 必须透传：graph 中不承载脚本级初始变量，缺省会在保存时静默清空。
+BlueprintScript graphToBlueprint(
+  fl.NodeGraph graph, {
+  required String name,
+  DateTime? createdAt,
+  Map<String, Object>? variables,
+}) {
+  final script = BlueprintScript(
+    name: name,
+    createdAt: createdAt,
+    variables: variables,
+  );
   for (final n in graph.nodes.values) {
     BPNode? def;
     try {
@@ -120,4 +130,18 @@ BlueprintScript graphToBlueprint(fl.NodeGraph graph, {required String name, Date
     );
   }
   return script;
+}
+
+/// 连线校验：执行流输出口仅允许一条出边。
+///
+/// 引擎沿首条执行流边走（其余边被静默忽略），必须在源头拒绝，
+/// 防止用户画出"看似并行、实则丢分支"的图；数据端口不受此限。
+bool blueprintConnectionValidator(fl.ConnectionCheck check) {
+  if (!check.allowedByDefault) return false;
+  if (check.fromPort.kind == fl.PortKind.control) {
+    for (final c in check.graph.connectionsOf(check.from.nodeId)) {
+      if (c.from == check.from) return false;
+    }
+  }
+  return true;
 }

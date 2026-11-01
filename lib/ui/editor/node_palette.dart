@@ -22,6 +22,14 @@ class NodePalette extends ConsumerWidget {
   final bool popOnAdd;
 
   void _addType(WidgetRef ref, BuildContext context, NodeTypeDef def) {
+    // 开始节点是唯一执行入口（引擎 findStart 任取其一），重复添加会造成不确定性
+    if (def.type == 'start' &&
+        controller.graph.nodes.values.any((n) => n.type == 'start')) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('开始节点已存在，一个脚本只需一个入口')),
+      );
+      return;
+    }
     // 视口中心（scene 坐标）附近，附随机偏移避免完全重叠
     Offset center = const Offset(200, 200);
     final editorState = editorStateKey?.currentState;
@@ -40,7 +48,9 @@ class NodePalette extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Container(
+    // Material 而非 ColoredBox：ListTile 的墨迹/背景绘制在最近的 Material 上，
+    // ColoredBox 会遮蔽点击反馈并触发调试断言
+    return Material(
       color: AppColors.moonWhite,
       child: ListView(
         padding: const EdgeInsets.only(bottom: 12),

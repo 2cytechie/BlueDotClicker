@@ -101,4 +101,91 @@ void main() {
     // 写盘前会做 JSON 编码，参数必须是可序列化的原始值
     expect(jsonEncode(out.toJson()), contains('"b"'));
   });
+
+  test('graphToBlueprint 透传脚本级 variables（不透传会在保存时清空）', () {
+    final s = _sample()..variables['hp'] = 100;
+    s.variables['name0'] = 'hero';
+    final graph = blueprintToGraph(s);
+    // 不带 variables 参数 → 默认空（旧的调用方错误用法）
+    final wiped = graphToBlueprint(graph, name: s.name);
+    expect(wiped.variables, isEmpty);
+    // 带 variables 参数 → 保留
+    final kept = graphToBlueprint(
+      graph,
+      name: s.name,
+      createdAt: s.createdAt,
+      variables: Map.of(s.variables),
+    );
+    expect(kept.variables['hp'], 100);
+    expect(kept.variables['name0'], 'hero');
+    // 透传的是拷贝：修改目标脚本不影响源
+    kept.variables['hp'] = 1;
+    expect(s.variables['hp'], 100);
+  });
+
+  group('连线校验：执行流输出口单出边（引擎只走首条执行流边）', () {
+    fl.NodeEditorController controller() {
+      final c = fl.NodeEditorController(definitions: blueprintNodeRegistry)
+        ..connectionValidator = blueprintConnectionValidator;
+      c.addNodes([
+        blueprintNodeRegistry.instantiate('start', id: 'st', position: Offset.zero),
+        blueprintNodeRegistry.instantiate('click', id: 'a', position: const Offset(200, 0)),
+        blueprintNodeRegistry.instantiate('click', id: 'b', position: const Offset(200, 150)),
+        blueprintNodeRegistry.instantiate('ocr', id: 'ocr', position: const Offset(0, 300)),
+        blueprintNodeRegistry.instantiate('condition', id: 'c1', position: const Offset(300, 300)),
+        blueprintNodeRegistry.instantiate('condition', id: 'c2', position: const Offset(300, 450)),
+      ]);
+      return c;
+    }
+
+    test('执行流出口第二条出边被拒', () {
+      final c = controller();
+      expect(
+        c.connect(const fl.PortRef('st', 'out'), const fl.PortRef('a', 'in')),
+        isNotNull,
+      );
+      // 同一出口连第二个节点：静默丢分支的陷阱，必须拒绝
+      expect(
+        c.connect(const fl.PortRef('st', 'out'), const fl.PortRef('b', 'in')),
+        isNull,
+      );
+      expect(c.graph.connections.length, 1);
+    });
+
+    test('数据输出口多出边仍允许（一源多消费是正常语义）', () {
+      final c = controller();
+      expect(
+        c.connect(const fl.PortRef('ocr', 'text'), const fl.PortRef('c1', 'left')),
+        isNotNull,
+      );
+      expect(
+        c.connect(const fl.PortRef('ocr', 'text'), const fl.PortRef('c2', 'left')),
+        isNotNull,
+      );
+      expect(c.graph.connections.length, 2);
+    });
+
+    test('执行流输入口第二条入边被拒（maxConnections 既有约束）', () {
+      final c = controller();
+      expect(
+        c.connect(const fl.PortRef('st', 'out'), const fl.PortRef('a', 'in')),
+        isNotNull,
+      );
+      c.addNodes([
+        blueprintNodeRegistry.instantiate('start', id: 'st2', position: Offset.zero),
+      ]);
+      // a 的入边已占满（maxConnections: 1）——再连第二个开始节点应被拒
+      expect(
+        c.connect(const fl.PortRef('st2', 'out'), const fl.PortRef('a', 'in')),
+        isNull,
+      );
+    });
+
+    test('不同执行流出口可各连一条', () {
+      final c = controller();
+      expect(c.connect(const fl.PortRef('st', 'out'), const fl.PortRef('a', 'in')), isNotNull);
+      expect(c.connect(const fl.PortRef('a', 'out'), const fl.PortRef('b', 'in')), isNotNull);
+      expect(c.graph.connections.length, 2);
+    });
+  });
 }

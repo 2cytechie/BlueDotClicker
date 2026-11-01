@@ -27,14 +27,14 @@ Future<Directory> _appDataDir() async {
 
 /// 脚本 JSON 文件存储：应用文档目录/scripts/<名称>.bpc.json
 class ScriptStorage {
-  Directory? _dir;
+  /// 测试注入：覆盖数据根目录（跳过 path_provider 插件）
+  static Directory? _overrideDir;
+  static void overrideDir(Directory dir) => _overrideDir = dir;
 
   Future<Directory> get dir async {
-    if (_dir != null) return _dir!;
-    final base = await _appDataDir();
+    final base = _overrideDir ?? await _appDataDir();
     final d = Directory('${base.path}/scripts');
     if (!await d.exists()) await d.create(recursive: true);
-    _dir = d;
     return d;
   }
 
@@ -75,6 +75,10 @@ class ScriptStorage {
     }
   }
 
+  /// 是否已存在同名脚本（Windows 文件系统大小写不敏感，天然覆盖大小写冲突）
+  Future<bool> exists(String name) async =>
+      File('${(await dir).path}/${_safeName(name)}.bpc.json').exists();
+
   Future<void> delete(String name) async {
     final d = await dir;
     final f = File('${d.path}/${_safeName(name)}.bpc.json');
@@ -100,7 +104,18 @@ class ScriptStorage {
 
   Future<BlueprintScript> importFromString(String json, {String? fallbackName}) async {
     final s = BlueprintScript.fromJson(jsonDecode(json) as Map<String, dynamic>);
-    if (fallbackName != null && fallbackName.isNotEmpty && s.name.isEmpty) s.name = fallbackName;
+    var name = s.name.trim().isNotEmpty
+        ? s.name
+        : (fallbackName?.trim().isNotEmpty == true ? fallbackName! : '未命名');
+    // 同名脚本自动加后缀，避免静默覆盖已有脚本
+    if (await exists(name)) {
+      var i = 2;
+      while (await exists('$name ($i)')) {
+        i++;
+      }
+      name = '$name ($i)';
+    }
+    s.name = name;
     await save(s);
     return s;
   }
@@ -113,14 +128,14 @@ class ScriptStorage {
 
 /// 录制会话持久化：应用文档目录/recordings/*.json
 class RecordingStorage {
-  Directory? _dir;
+  /// 测试注入：覆盖数据根目录（跳过 path_provider 插件）
+  static Directory? _overrideDir;
+  static void overrideDir(Directory dir) => _overrideDir = dir;
 
   Future<Directory> get dir async {
-    if (_dir != null) return _dir!;
-    final base = await _appDataDir();
+    final base = _overrideDir ?? await _appDataDir();
     final d = Directory('${base.path}/recordings');
     if (!await d.exists()) await d.create(recursive: true);
-    _dir = d;
     return d;
   }
 
@@ -143,7 +158,8 @@ class RecordingStorage {
 
   Future<List<Recording>> list() async {
     final d = await dir;
-    final files = await d.list().cast<File>().toList();
+    // 过滤非文件条目：目录混入会让 cast<File> 在迭代时抛 TypeError（列表整体报废）
+    final files = await d.list().where((e) => e is File).cast<File>().toList();
     final out = <Recording>[];
     for (final f in files) {
       try {

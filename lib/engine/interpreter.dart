@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 
 import '../models/blueprint.dart';
 import '../platform/platform_automation.dart';
@@ -440,12 +441,19 @@ class BlueprintInterpreter {
     }
   }
 
-  RawImage _cropImage(RawImage img, RectPx r) {
-    final w = r.w.clamp(1, img.width - r.x);
-    final h = r.h.clamp(1, img.height - r.y);
+  RawImage _cropImage(RawImage img, RectPx r) => cropImage(img, r);
+
+  /// 裁剪图像区域。越界参数先钳制到图像内（直接 clamp 宽高会在起点越界时抛
+  /// ArgumentError，导致整个脚本中止），越界部分视为被图像边缘截断。
+  @visibleForTesting
+  static RawImage cropImage(RawImage img, RectPx r) {
+    final x = r.x.clamp(0, img.width - 1);
+    final y = r.y.clamp(0, img.height - 1);
+    final w = r.w.clamp(1, img.width - x);
+    final h = r.h.clamp(1, img.height - y);
     final result = Uint8List(w * h * 4);
     for (var row = 0; row < h; row++) {
-      final srcStart = ((r.y + row) * img.width + r.x) * 4;
+      final srcStart = ((y + row) * img.width + x) * 4;
       result.setRange(row * w * 4, (row + 1) * w * 4, img.bgra, srcStart);
     }
     return RawImage(w, h, result);

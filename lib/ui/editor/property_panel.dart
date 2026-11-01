@@ -221,6 +221,7 @@ class PropertyPanel extends ConsumerWidget {
     switch (f.type) {
       case ParamType.int:
         return _ParamTextField(
+          controller: controller,
           node: node,
           field: f,
           onCommit: onCommit,
@@ -228,6 +229,7 @@ class PropertyPanel extends ConsumerWidget {
         );
       case ParamType.double:
         return _ParamTextField(
+          controller: controller,
           node: node,
           field: f,
           onCommit: onCommit,
@@ -236,6 +238,7 @@ class PropertyPanel extends ConsumerWidget {
       case ParamType.string:
       case ParamType.varName:
         return _ParamTextField(
+          controller: controller,
           node: node,
           field: f,
           onCommit: onCommit,
@@ -392,15 +395,19 @@ class PropertyPanel extends ConsumerWidget {
 
 enum _NumberMode { none, int, double }
 
-/// 文本参数字段：持有本地 controller，避免每次全局刷新导致光标跳动
+/// 文本参数字段：持有本地 controller，避免每次全局刷新导致光标跳动。
+/// 焦点期间开启撤销事务：整段输入折叠为一条撤销记录（否则每键一条，
+/// 几十个字符就会冲掉全部撤销历史）。
 class _ParamTextField extends StatefulWidget {
   const _ParamTextField({
+    required this.controller,
     required this.node,
     required this.field,
     required this.onCommit,
     required this.numberMode,
   });
 
+  final fl.NodeEditorController controller;
   final fl.GraphNode node;
   final ParamFieldDef field;
   final void Function(Object value) onCommit;
@@ -412,6 +419,8 @@ class _ParamTextField extends StatefulWidget {
 
 class _ParamTextFieldState extends State<_ParamTextField> {
   late final TextEditingController _controller;
+  late final FocusNode _focus;
+  bool _txnOpen = false;
 
   /// 最近一次已知的字段值：外部写入（如坐标拾取）时据此同步文本
   Object? _lastApplied;
@@ -424,6 +433,18 @@ class _ParamTextFieldState extends State<_ParamTextField> {
     super.initState();
     _lastApplied = _rawValue;
     _controller = TextEditingController(text: _valueText());
+    _focus = FocusNode()..addListener(_onFocusChange);
+  }
+
+  void _onFocusChange() {
+    if (_focus.hasFocus && !_txnOpen) {
+      widget.controller.history.beginTransaction();
+      _txnOpen = true;
+    } else if (!_focus.hasFocus && _txnOpen) {
+      // 空输入时 baseline == graph，commitTransaction 不会产生撤销记录
+      widget.controller.history.commitTransaction();
+      _txnOpen = false;
+    }
   }
 
   String _valueText() {
@@ -458,6 +479,13 @@ class _ParamTextFieldState extends State<_ParamTextField> {
 
   @override
   void dispose() {
+    // 节点被删/面板切换等卸载时兜底提交事务，防止事务泄漏破坏后续撤销粒度
+    _focus.removeListener(_onFocusChange);
+    if (_txnOpen) {
+      widget.controller.history.commitTransaction();
+      _txnOpen = false;
+    }
+    _focus.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -490,6 +518,7 @@ class _ParamTextFieldState extends State<_ParamTextField> {
       padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
         controller: _controller,
+        focusNode: _focus,
         keyboardType: widget.numberMode == _NumberMode.none
             ? null
             : TextInputType.number,
