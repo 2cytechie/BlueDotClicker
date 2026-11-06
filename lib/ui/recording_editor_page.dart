@@ -6,8 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/theme.dart';
 import '../models/blueprint.dart';
-import '../platform/recording.dart'
-    show describeAction, replayActions, vkName;
+import '../platform/recording.dart' show describeAction, replayActions, vkName;
 import '../platform/screen_marker.dart';
 import '../platform/win32/user32.dart' as u32;
 import '../services/script_storage.dart' show RecordingStorage;
@@ -354,20 +353,48 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
     switch (_actions[i]) {
       case RecClick c:
         _updateAction(
-            i, RecClick(c.offsetMs, c.x + dx * step, c.y + dy * step,
-                count: c.count, button: c.button));
+          i,
+          RecClick(
+            c.offsetMs,
+            c.x + dx * step,
+            c.y + dy * step,
+            count: c.count,
+            button: c.button,
+          ),
+        );
       case RecLongPress p:
-        _updateAction(i,
-            RecLongPress(p.offsetMs, p.x + dx * step, p.y + dy * step, p.durationMs));
+        _updateAction(
+          i,
+          RecLongPress(
+            p.offsetMs,
+            p.x + dx * step,
+            p.y + dy * step,
+            p.durationMs,
+          ),
+        );
       case RecScroll s:
-        _updateAction(i,
-            RecScroll(s.offsetMs, s.x + dx * step, s.y + dy * step,
-                dx: s.dx, dy: s.dy));
+        _updateAction(
+          i,
+          RecScroll(
+            s.offsetMs,
+            s.x + dx * step,
+            s.y + dy * step,
+            dx: s.dx,
+            dy: s.dy,
+          ),
+        );
       case RecSwipe w:
         _updateAction(
-            i,
-            RecSwipe(w.offsetMs, w.x1 + dx * step, w.y1 + dy * step,
-                w.x2 + dx * step, w.y2 + dy * step, w.durationMs));
+          i,
+          RecSwipe(
+            w.offsetMs,
+            w.x1 + dx * step,
+            w.y1 + dy * step,
+            w.x2 + dx * step,
+            w.y2 + dy * step,
+            w.durationMs,
+          ),
+        );
       default:
         break; // 按键/组合键无坐标
     }
@@ -394,7 +421,9 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
       _markerIndex = -1;
       return;
     }
-    ref.read(screenMarkerProvider).show(
+    ref
+        .read(screenMarkerProvider)
+        .show(
           points,
           // 动态读取当前 _markerIndex：列表重排/增删后不会指错动作
           onDragEnd: (pointIndex, x, y) {
@@ -482,26 +511,41 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
                 onChanged: (v) =>
                     setDialogState(() => insertAfterExpanded = v ?? false),
                 controlAffinity: ListTileControlAffinity.leading,
-                title: const Text('插入到当前展开动作之后',
-                    style: TextStyle(fontSize: 13, color: AppColors.inkSecondary)),
+                title: const Text(
+                  '插入到当前展开动作之后',
+                  style: TextStyle(fontSize: 13, color: AppColors.inkSecondary),
+                ),
               ),
               for (final entry in const {
                 'RecClick': ('点击', Icons.mouse_rounded, AppColors.peacock),
                 'RecSwipe': ('滑动', Icons.swipe_rounded, AppColors.nodeMedia),
                 'RecLongPress': ('长按', Icons.timer_rounded, AppColors.danger),
-                'RecScroll': ('滚轮', Icons.swap_vert_rounded, AppColors.nodeScript),
+                'RecScroll': (
+                  '滚轮',
+                  Icons.swap_vert_rounded,
+                  AppColors.nodeScript,
+                ),
                 'RecKey': ('按键', Icons.keyboard_rounded, AppColors.nodeData),
-                'RecCombo': ('组合键', Icons.keyboard_command_key_rounded, AppColors.success),
+                'RecCombo': (
+                  '组合键',
+                  Icons.keyboard_command_key_rounded,
+                  AppColors.success,
+                ),
               }.entries)
                 SimpleDialogOption(
-                  onPressed: () => Navigator.pop(ctx, (entry.key, insertAfterExpanded)),
+                  onPressed: () =>
+                      Navigator.pop(ctx, (entry.key, insertAfterExpanded)),
                   child: Row(
                     children: [
                       Icon(entry.value.$2, size: 20, color: entry.value.$3),
                       const SizedBox(width: 12),
-                      Text(entry.value.$1,
-                          style: const TextStyle(
-                              fontSize: 15, color: AppColors.ink)),
+                      Text(
+                        entry.value.$1,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          color: AppColors.ink,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -515,13 +559,11 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
     final (sw, sh) = ref.read(automationProvider).screenSize;
     final cx = sw ~/ 2;
     final cy = sh ~/ 2;
-    final lastOffset =
-        _actions.isEmpty ? 0 : _actions.last.offsetMs;
+    final lastOffset = _actions.isEmpty ? 0 : _actions.last.offsetMs;
     final offset = lastOffset + 500;
     final action = switch (kind) {
       'RecClick' => RecClick(offset, cx, cy),
-      'RecSwipe' =>
-        RecSwipe(offset, cx - 100, cy, cx + 100, cy, 300),
+      'RecSwipe' => RecSwipe(offset, cx - 100, cy, cx + 100, cy, 300),
       'RecLongPress' => RecLongPress(offset, cx, cy, 800),
       'RecScroll' => RecScroll(offset, cx, cy, dy: 120),
       'RecKey' => RecKey(offset, 0x41, durationMs: 60),
@@ -539,24 +581,23 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
       bindings: {
         const SingleActivator(LogicalKeyboardKey.keyZ, control: true): _undo,
         const SingleActivator(LogicalKeyboardKey.keyY, control: true): _redo,
-        const SingleActivator(LogicalKeyboardKey.delete):
-            _deleteExpandedAction,
-        const SingleActivator(LogicalKeyboardKey.arrowUp):
-            () => _nudgeExpanded(0, -1),
-        const SingleActivator(LogicalKeyboardKey.arrowDown):
-            () => _nudgeExpanded(0, 1),
-        const SingleActivator(LogicalKeyboardKey.arrowLeft):
-            () => _nudgeExpanded(-1, 0),
-        const SingleActivator(LogicalKeyboardKey.arrowRight):
-            () => _nudgeExpanded(1, 0),
-        const SingleActivator(LogicalKeyboardKey.arrowUp, shift: true):
-            () => _nudgeExpanded(0, -1, step: 10),
-        const SingleActivator(LogicalKeyboardKey.arrowDown, shift: true):
-            () => _nudgeExpanded(0, 1, step: 10),
-        const SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true):
-            () => _nudgeExpanded(-1, 0, step: 10),
-        const SingleActivator(LogicalKeyboardKey.arrowRight, shift: true):
-            () => _nudgeExpanded(1, 0, step: 10),
+        const SingleActivator(LogicalKeyboardKey.delete): _deleteExpandedAction,
+        const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+            _nudgeExpanded(0, -1),
+        const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+            _nudgeExpanded(0, 1),
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+            _nudgeExpanded(-1, 0),
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+            _nudgeExpanded(1, 0),
+        const SingleActivator(LogicalKeyboardKey.arrowUp, shift: true): () =>
+            _nudgeExpanded(0, -1, step: 10),
+        const SingleActivator(LogicalKeyboardKey.arrowDown, shift: true): () =>
+            _nudgeExpanded(0, 1, step: 10),
+        const SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true): () =>
+            _nudgeExpanded(-1, 0, step: 10),
+        const SingleActivator(LogicalKeyboardKey.arrowRight, shift: true): () =>
+            _nudgeExpanded(1, 0, step: 10),
       },
       child: Scaffold(
         body: Padding(
@@ -575,17 +616,22 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
                   Expanded(
                     child: PageHeader(
                       title: '编辑录制',
-                      subtitle: '$_name · ${_actions.length} 个动作 · 总时长 ${_totalSeconds}s',
+                      subtitle:
+                          '$_name · ${_actions.length} 个动作 · 总时长 ${_totalSeconds}s',
                       trailing: [
                         IconButton(
                           tooltip: '重命名',
-                          icon: const Icon(Icons.drive_file_rename_outline_rounded,
-                              size: 20),
+                          icon: const Icon(
+                            Icons.drive_file_rename_outline_rounded,
+                            size: 20,
+                          ),
                           onPressed: _rename,
                         ),
                         if (_replaying)
                           const StatusBadge(
-                              text: '回放中 · F10 中止', color: AppColors.nodeLogic),
+                            text: '回放中 · F10 中止',
+                            color: AppColors.nodeLogic,
+                          ),
                       ],
                     ),
                   ),
@@ -608,9 +654,12 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
                       foregroundColor: Colors.white,
                       side: const BorderSide(color: AppColors.peacock),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 12,
+                      ),
                     ),
                     onPressed: _replaying ? null : _replay,
                     icon: const Icon(Icons.play_arrow_rounded, size: 18),
@@ -622,8 +671,7 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
                     color: _undoStack.isEmpty
                         ? AppColors.inkSecondary.withValues(alpha: 0.4)
                         : AppColors.inkSecondary,
-                    onPressed:
-                        _undoStack.isEmpty || _replaying ? null : _undo,
+                    onPressed: _undoStack.isEmpty || _replaying ? null : _undo,
                   ),
                   IconButton(
                     tooltip: '重做 (Ctrl+Y)',
@@ -631,8 +679,7 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
                     color: _redoStack.isEmpty
                         ? AppColors.inkSecondary.withValues(alpha: 0.4)
                         : AppColors.inkSecondary,
-                    onPressed:
-                        _redoStack.isEmpty || _replaying ? null : _redo,
+                    onPressed: _redoStack.isEmpty || _replaying ? null : _redo,
                   ),
                 ],
               ),
@@ -643,7 +690,9 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
                         child: Text(
                           '暂无动作，点击「添加动作」开始编排',
                           style: TextStyle(
-                              fontSize: 13, color: AppColors.inkSecondary),
+                            fontSize: 13,
+                            color: AppColors.inkSecondary,
+                          ),
                         ),
                       )
                     : ReorderableListView.builder(
@@ -664,8 +713,10 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
                             isLast: i == _actions.length - 1,
                             hasCoordinate:
                                 _markerPointsFor(_actions[i]) != null,
-                            onToggleExpand: () => setState(() =>
-                                _expandedIndex = _expandedIndex == i ? -1 : i),
+                            onToggleExpand: () => setState(
+                              () =>
+                                  _expandedIndex = _expandedIndex == i ? -1 : i,
+                            ),
                             onUpdate: (a) => _updateAction(i, a),
                             onMoveUp: () => _moveAction(i, -1),
                             onMoveDown: () => _moveAction(i, 1),
@@ -724,7 +775,11 @@ class _ActionTile extends StatelessWidget {
     RecLongPress() => (AppColors.danger, '长按', Icons.timer_rounded),
     RecScroll() => (AppColors.nodeScript, '滚轮', Icons.swap_vert_rounded),
     RecKey() => (AppColors.nodeData, '按键', Icons.keyboard_rounded),
-    RecCombo() => (AppColors.success, '组合键', Icons.keyboard_command_key_rounded),
+    RecCombo() => (
+      AppColors.success,
+      '组合键',
+      Icons.keyboard_command_key_rounded,
+    ),
   };
 
   @override
@@ -756,8 +811,7 @@ class _ActionTile extends StatelessWidget {
               ),
               const SizedBox(width: 4),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(999),
@@ -768,11 +822,14 @@ class _ActionTile extends StatelessWidget {
                   children: [
                     Icon(icon, size: 13, color: color),
                     const SizedBox(width: 4),
-                    Text(name,
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: color)),
+                    Text(
+                      name,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w400,
+                        color: color,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -787,41 +844,57 @@ class _ActionTile extends StatelessWidget {
                       Text(
                         '${index + 1}.',
                         style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.ink),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w400,
+                          color: AppColors.ink,
+                        ),
                       ),
                       const SizedBox(width: 6),
                       Text(
                         '[+${action.offsetMs}ms]',
                         style: const TextStyle(
-                            fontSize: 12, color: AppColors.inkSecondary),
+                          fontSize: 12,
+                          color: AppColors.inkSecondary,
+                        ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           describeAction(action),
                           style: const TextStyle(
-                              fontSize: 13, color: AppColors.ink),
+                            fontSize: 13,
+                            color: AppColors.ink,
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
               ),
-              _iconBtn(Icons.arrow_upward_rounded, '上移',
-                  isFirst ? null : onMoveUp),
-              _iconBtn(Icons.arrow_downward_rounded, '下移',
-                  isLast ? null : onMoveDown),
-              _iconBtn(Icons.delete_outline_rounded, '删除', onDelete,
-                  color: AppColors.danger),
               _iconBtn(
-                  expanded
-                      ? Icons.expand_less_rounded
-                      : Icons.expand_more_rounded,
-                  expanded ? '收起' : '编辑',
-                  onToggleExpand,
-                  color: expanded ? AppColors.peacock : AppColors.inkSecondary),
+                Icons.arrow_upward_rounded,
+                '上移',
+                isFirst ? null : onMoveUp,
+              ),
+              _iconBtn(
+                Icons.arrow_downward_rounded,
+                '下移',
+                isLast ? null : onMoveDown,
+              ),
+              _iconBtn(
+                Icons.delete_outline_rounded,
+                '删除',
+                onDelete,
+                color: AppColors.danger,
+              ),
+              _iconBtn(
+                expanded
+                    ? Icons.expand_less_rounded
+                    : Icons.expand_more_rounded,
+                expanded ? '收起' : '编辑',
+                onToggleExpand,
+                color: expanded ? AppColors.peacock : AppColors.inkSecondary,
+              ),
             ],
           ),
           AnimatedCrossFade(
@@ -847,8 +920,12 @@ class _ActionTile extends StatelessWidget {
     );
   }
 
-  Widget _iconBtn(IconData icon, String tooltip, VoidCallback? onPressed,
-      {Color? color}) {
+  Widget _iconBtn(
+    IconData icon,
+    String tooltip,
+    VoidCallback? onPressed, {
+    Color? color,
+  }) {
     return IconButton(
       visualDensity: VisualDensity.compact,
       constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
@@ -913,24 +990,32 @@ class _EditPanel extends StatelessWidget {
             const SizedBox(height: 10),
             FilledButton.tonalIcon(
               style: FilledButton.styleFrom(
-                backgroundColor:
-                    marking ? AppColors.peacock : AppColors.canvasBg,
+                backgroundColor: marking
+                    ? AppColors.peacock
+                    : AppColors.canvasBg,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
               ),
               onPressed: replaying ? null : onToggleMarker,
               icon: Icon(
-                marking ? Icons.location_on_rounded : Icons.location_on_outlined,
+                marking
+                    ? Icons.location_on_rounded
+                    : Icons.location_on_outlined,
                 size: 16,
               ),
-              label: Text(replaying
-                  ? '回放中 · 屏幕定位不可用'
-                  : marking
-                      ? '屏幕定位中 · 拖拽图标改坐标'
-                      : '屏幕定位'),
+              label: Text(
+                replaying
+                    ? '回放中 · 屏幕定位不可用'
+                    : marking
+                    ? '屏幕定位中 · 拖拽图标改坐标'
+                    : '屏幕定位',
+              ),
             ),
           ],
         ],
@@ -950,71 +1035,149 @@ class _EditPanel extends StatelessWidget {
       case RecScroll s:
         onUpdate(RecScroll(offset, s.x, s.y, dx: s.dx, dy: s.dy));
       case RecKey k:
-        onUpdate(RecKey(offset, k.vkCode,
-            durationMs: k.durationMs, extended: k.extended));
+        onUpdate(
+          RecKey(
+            offset,
+            k.vkCode,
+            durationMs: k.durationMs,
+            extended: k.extended,
+          ),
+        );
       case RecCombo b:
-        onUpdate(RecCombo(offset, b.vkCodes,
-            extendeds: b.extendeds, durationMs: b.durationMs));
+        onUpdate(
+          RecCombo(
+            offset,
+            b.vkCodes,
+            extendeds: b.extendeds,
+            durationMs: b.durationMs,
+          ),
+        );
     }
   }
 
   List<Widget> _typeFields(BuildContext context) => switch (action) {
     RecClick c => [
-        _num('x', c.x, (v) => RecClick(c.offsetMs, v, c.y,
-            count: c.count, button: c.button)),
-        _num('y', c.y, (v) => RecClick(c.offsetMs, c.x, v,
-            count: c.count, button: c.button)),
-        _num('次数', c.count, (v) => RecClick(c.offsetMs, c.x, c.y,
-            count: v, button: c.button),
-            min: 1, max: 99),
-        _buttonSelector(c),
-      ],
+      _num(
+        'x',
+        c.x,
+        (v) => RecClick(c.offsetMs, v, c.y, count: c.count, button: c.button),
+      ),
+      _num(
+        'y',
+        c.y,
+        (v) => RecClick(c.offsetMs, c.x, v, count: c.count, button: c.button),
+      ),
+      _num(
+        '次数',
+        c.count,
+        (v) => RecClick(c.offsetMs, c.x, c.y, count: v, button: c.button),
+        min: 1,
+        max: 99,
+      ),
+      _buttonSelector(c),
+    ],
     RecSwipe w => [
-        _num('起点x', w.x1, (v) => RecSwipe(w.offsetMs, v, w.y1, w.x2, w.y2, w.durationMs)),
-        _num('起点y', w.y1, (v) => RecSwipe(w.offsetMs, w.x1, v, w.x2, w.y2, w.durationMs)),
-        _num('终点x', w.x2, (v) => RecSwipe(w.offsetMs, w.x1, w.y1, v, w.y2, w.durationMs)),
-        _num('终点y', w.y2, (v) => RecSwipe(w.offsetMs, w.x1, w.y1, w.x2, v, w.durationMs)),
-        _num('时长(ms)', w.durationMs, (v) => RecSwipe(w.offsetMs, w.x1, w.y1, w.x2, w.y2, v),
-            min: 10, max: 60000),
-      ],
+      _num(
+        '起点x',
+        w.x1,
+        (v) => RecSwipe(w.offsetMs, v, w.y1, w.x2, w.y2, w.durationMs),
+      ),
+      _num(
+        '起点y',
+        w.y1,
+        (v) => RecSwipe(w.offsetMs, w.x1, v, w.x2, w.y2, w.durationMs),
+      ),
+      _num(
+        '终点x',
+        w.x2,
+        (v) => RecSwipe(w.offsetMs, w.x1, w.y1, v, w.y2, w.durationMs),
+      ),
+      _num(
+        '终点y',
+        w.y2,
+        (v) => RecSwipe(w.offsetMs, w.x1, w.y1, w.x2, v, w.durationMs),
+      ),
+      _num(
+        '时长(ms)',
+        w.durationMs,
+        (v) => RecSwipe(w.offsetMs, w.x1, w.y1, w.x2, w.y2, v),
+        min: 10,
+        max: 60000,
+      ),
+    ],
     RecLongPress p => [
-        _num('x', p.x, (v) => RecLongPress(p.offsetMs, v, p.y, p.durationMs)),
-        _num('y', p.y, (v) => RecLongPress(p.offsetMs, p.x, v, p.durationMs)),
-        _num('时长(ms)', p.durationMs,
-            (v) => RecLongPress(p.offsetMs, p.x, p.y, v),
-            min: 10, max: 60000),
-      ],
+      _num('x', p.x, (v) => RecLongPress(p.offsetMs, v, p.y, p.durationMs)),
+      _num('y', p.y, (v) => RecLongPress(p.offsetMs, p.x, v, p.durationMs)),
+      _num(
+        '时长(ms)',
+        p.durationMs,
+        (v) => RecLongPress(p.offsetMs, p.x, p.y, v),
+        min: 10,
+        max: 60000,
+      ),
+    ],
     RecScroll s => [
-        _num('x', s.x, (v) => RecScroll(s.offsetMs, v, s.y, dx: s.dx, dy: s.dy)),
-        _num('y', s.y, (v) => RecScroll(s.offsetMs, s.x, v, dx: s.dx, dy: s.dy)),
-        _num('垂直Δ', s.dy, (v) => RecScroll(s.offsetMs, s.x, s.y, dx: s.dx, dy: v)),
-        _num('水平Δ', s.dx, (v) => RecScroll(s.offsetMs, s.x, s.y, dx: v, dy: s.dy)),
-      ],
+      _num('x', s.x, (v) => RecScroll(s.offsetMs, v, s.y, dx: s.dx, dy: s.dy)),
+      _num('y', s.y, (v) => RecScroll(s.offsetMs, s.x, v, dx: s.dx, dy: s.dy)),
+      _num(
+        '垂直Δ',
+        s.dy,
+        (v) => RecScroll(s.offsetMs, s.x, s.y, dx: s.dx, dy: v),
+      ),
+      _num(
+        '水平Δ',
+        s.dx,
+        (v) => RecScroll(s.offsetMs, s.x, s.y, dx: v, dy: s.dy),
+      ),
+    ],
     RecKey k => [
-        _keyPicker(
-          context,
-          label: '按键',
-          text: vkName(k.vkCode),
-          onPicked: (vk) => onUpdate(RecKey(k.offsetMs, vk,
-              durationMs: k.durationMs, extended: k.extended)),
+      _keyPicker(
+        context,
+        label: '按键',
+        text: vkName(k.vkCode),
+        onPicked: (vk) => onUpdate(
+          RecKey(
+            k.offsetMs,
+            vk,
+            durationMs: k.durationMs,
+            extended: k.extended,
+          ),
         ),
-        _num('时长(ms)', k.durationMs,
-            (v) => RecKey(k.offsetMs, k.vkCode,
-                durationMs: v, extended: k.extended),
-            min: 1, max: 60000),
-      ],
+      ),
+      _num(
+        '时长(ms)',
+        k.durationMs,
+        (v) =>
+            RecKey(k.offsetMs, k.vkCode, durationMs: v, extended: k.extended),
+        min: 1,
+        max: 60000,
+      ),
+    ],
     RecCombo b => [
-        _comboEditor(context, b),
-        _num('时长(ms)', b.durationMs,
-            (v) => RecCombo(b.offsetMs, b.vkCodes,
-                extendeds: b.extendeds, durationMs: v),
-            min: 1, max: 60000),
-      ],
+      _comboEditor(context, b),
+      _num(
+        '时长(ms)',
+        b.durationMs,
+        (v) => RecCombo(
+          b.offsetMs,
+          b.vkCodes,
+          extendeds: b.extendeds,
+          durationMs: v,
+        ),
+        min: 1,
+        max: 60000,
+      ),
+    ],
   };
 
   /// 数字字段（自动从数据回显；外部更新坐标时输入框同步）
-  Widget _num(String label, int value, RecordedAction Function(int v) make,
-      {int min = -1000000, int max = 1000000}) {
+  Widget _num(
+    String label,
+    int value,
+    RecordedAction Function(int v) make, {
+    int min = -1000000,
+    int max = 1000000,
+  }) {
     return NumField(
       label: label,
       value: value,
@@ -1064,8 +1227,12 @@ class _EditPanel extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
             child: Row(
               children: [
-                Expanded(child: Text(text,
-                    style: const TextStyle(fontSize: 14, color: AppColors.ink))),
+                Expanded(
+                  child: Text(
+                    text,
+                    style: const TextStyle(fontSize: 14, color: AppColors.ink),
+                  ),
+                ),
                 const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
               ],
             ),
@@ -1091,9 +1258,14 @@ class _EditPanel extends StatelessWidget {
                   final codes = List.of(b.vkCodes)..removeAt(i);
                   final exts = List.of(b.extendeds);
                   if (i < exts.length) exts.removeAt(i);
-                  onUpdate(RecCombo(b.offsetMs, codes,
+                  onUpdate(
+                    RecCombo(
+                      b.offsetMs,
+                      codes,
                       extendeds: List<bool>.from(exts),
-                      durationMs: b.durationMs));
+                      durationMs: b.durationMs,
+                    ),
+                  );
                 },
               ),
             ActionChip(
@@ -1108,9 +1280,14 @@ class _EditPanel extends StatelessWidget {
                   exts.add(false);
                 }
                 exts.add(false);
-                onUpdate(RecCombo(b.offsetMs, codes,
+                onUpdate(
+                  RecCombo(
+                    b.offsetMs,
+                    codes,
                     extendeds: List<bool>.from(exts),
-                    durationMs: b.durationMs));
+                    durationMs: b.durationMs,
+                  ),
+                );
               },
             ),
           ],
@@ -1124,7 +1301,13 @@ class _EditPanel extends StatelessWidget {
 
 /// 常用可选虚拟键（编辑动作的按键/组合键用）
 const List<int> kSelectableVks = [
-  0x08, 0x09, 0x0D, 0x13, 0x14, 0x1B, 0x20, // Backspace Tab Enter Pause Caps Esc Space
+  0x08,
+  0x09,
+  0x0D,
+  0x13,
+  0x14,
+  0x1B,
+  0x20, // Backspace Tab Enter Pause Caps Esc Space
   0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, // PgUp..Delete
   0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, // 0-9
   0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4C, //
@@ -1133,7 +1316,18 @@ const List<int> kSelectableVks = [
   0x5B, // Win
   0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, // 小键盘 0-9
   0x6A, 0x6B, 0x6D, 0x6E, 0x6F, // Num* + - . /
-  0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, // F1-F12
+  0x70,
+  0x71,
+  0x72,
+  0x73,
+  0x74,
+  0x75,
+  0x76,
+  0x77,
+  0x78,
+  0x79,
+  0x7A,
+  0x7B, // F1-F12
   0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, // LShift RShift LCtrl RCtrl LAlt RAlt
   0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE, // 符号
 ];
@@ -1200,10 +1394,7 @@ class _KeyListenDialogState extends State<_KeyListenDialog> {
     for (var vk = 0x08; vk <= 0xFE; vk++) {
       if (u32.isKeyDown(vk)) _initialDown.add(vk);
     }
-    _timer = Timer.periodic(
-      const Duration(milliseconds: 10),
-      (_) => _poll(),
-    );
+    _timer = Timer.periodic(const Duration(milliseconds: 10), (_) => _poll());
   }
 
   void _poll() {
@@ -1247,14 +1438,8 @@ class _KeyListenDialogState extends State<_KeyListenDialog> {
       title: const Text('按键监听中'),
       content: const Text('请直接按下要设置的按键\n按 Esc 取消'),
       actions: [
-        TextButton(
-          onPressed: () => _finish(null),
-          child: const Text('取消'),
-        ),
-        OutlinedButton(
-          onPressed: _pickFromList,
-          child: const Text('从列表选择'),
-        ),
+        TextButton(onPressed: () => _finish(null), child: const Text('取消')),
+        OutlinedButton(onPressed: _pickFromList, child: const Text('从列表选择')),
       ],
     );
   }

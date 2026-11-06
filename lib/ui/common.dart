@@ -29,7 +29,7 @@ class PageHeader extends StatelessWidget {
                   title,
                   style: const TextStyle(
                     fontSize: 24,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w600,
                     color: AppColors.ink,
                   ),
                 ),
@@ -92,7 +92,7 @@ class SectionCard extends StatelessWidget {
                   title,
                   style: const TextStyle(
                     fontSize: 15,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w400,
                     color: AppColors.ink,
                   ),
                 ),
@@ -128,7 +128,7 @@ class StatusBadge extends StatelessWidget {
         text,
         style: TextStyle(
           fontSize: 12,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w400,
           color: color,
         ),
       ),

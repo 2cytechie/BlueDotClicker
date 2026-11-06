@@ -261,7 +261,9 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     final script = ref.watch(currentScriptProvider);
     // select 拆分：日志每步追加，若整页 watch 会在运行中导致整页（含画布）每条日志重建
     final running = ref.watch(runnerProvider.select((s) => s.running));
-    final runningNodeId = ref.watch(runnerProvider.select((s) => s.currentNodeId));
+    final runningNodeId = ref.watch(
+      runnerProvider.select((s) => s.currentNodeId),
+    );
     final currentNodeTitle = () {
       if (runningNodeId == null || _loadedScript == null) return '…';
       final n = _controller.graph.nodes[runningNodeId];
@@ -387,7 +389,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 fontSize: 15,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w500,
                 color: AppColors.ink,
               ),
             ),
@@ -444,7 +446,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
                     '运行中 · $currentNodeTitle',
                     style: const TextStyle(
                       fontSize: 12,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w400,
                       color: AppColors.success,
                     ),
                   ),
@@ -501,7 +503,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
             '尚未打开脚本',
             style: TextStyle(
               fontSize: 16,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w400,
               color: AppColors.inkSecondary,
             ),
           ),
@@ -688,7 +690,7 @@ class _LogsPanelState extends ConsumerState<_LogsPanel> {
                     '运行日志',
                     style: TextStyle(
                       fontSize: 12,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w400,
                       color: AppColors.ink,
                     ),
                   ),

@@ -65,6 +65,19 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # 全局圆润字体 MiSans（小米 · 免费商用）：300/400/500/600 四个字重
+  fonts:
+    - family: MiSans
+      fonts:
+        - asset: assets/fonts/MiSans-Regular.ttf
+          weight: 300
+        - asset: assets/fonts/MiSans-Medium.ttf
+          weight: 400
+        - asset: assets/fonts/MiSans-Demibold.ttf
+          weight: 500
+        - asset: assets/fonts/MiSans-Bold.ttf
+          weight: 600
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

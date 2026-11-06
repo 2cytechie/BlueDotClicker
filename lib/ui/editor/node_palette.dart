@@ -25,9 +25,9 @@ class NodePalette extends ConsumerWidget {
     // 开始节点是唯一执行入口（引擎 findStart 任取其一），重复添加会造成不确定性
     if (def.type == 'start' &&
         controller.graph.nodes.values.any((n) => n.type == 'start')) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(content: Text('开始节点已存在，一个脚本只需一个入口')),
-      );
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(const SnackBar(content: Text('开始节点已存在，一个脚本只需一个入口')));
       return;
     }
     // 视口中心（scene 坐标）附近，附随机偏移避免完全重叠
@@ -35,14 +35,18 @@ class NodePalette extends ConsumerWidget {
     final editorState = editorStateKey?.currentState;
     if (editorState != null) {
       final vp = editorState.viewportSize;
-      center = controller.camera.viewport.toScene(Offset(vp.width / 2, vp.height / 2));
+      center = controller.camera.viewport.toScene(
+        Offset(vp.width / 2, vp.height / 2),
+      );
     }
     final jitter = DateTime.now().microsecondsSinceEpoch % 60 - 30;
-    controller.addNode(blueprintNodeRegistry.instantiate(
-      def.type,
-      id: 'n_${DateTime.now().microsecondsSinceEpoch}',
-      position: Offset(center.dx - 100 + jitter, center.dy - 50 + jitter),
-    ));
+    controller.addNode(
+      blueprintNodeRegistry.instantiate(
+        def.type,
+        id: 'n_${DateTime.now().microsecondsSinceEpoch}',
+        position: Offset(center.dx - 100 + jitter, center.dy - 50 + jitter),
+      ),
+    );
     if (popOnAdd && Navigator.of(context).canPop()) Navigator.of(context).pop();
   }
 
@@ -59,7 +63,11 @@ class NodePalette extends ConsumerWidget {
             padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
             child: Text(
               '节点库',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.inkSecondary),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: AppColors.inkSecondary,
+              ),
             ),
           ),
           for (final category in NodeCategory.values)
@@ -67,7 +75,11 @@ class NodePalette extends ConsumerWidget {
               leading: Icon(category.icon, color: category.color),
               title: Text(
                 category.label,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.ink),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                  color: AppColors.ink,
+                ),
               ),
               initiallyExpanded: category == NodeCategory.interaction,
               childrenPadding: const EdgeInsets.only(bottom: 4),
@@ -76,16 +88,27 @@ class NodePalette extends ConsumerWidget {
                   if (def.category == category)
                     ListTile(
                       dense: true,
-                      leading: Icon(def.icon, color: def.category.color, size: 22),
+                      leading: Icon(
+                        def.icon,
+                        color: def.category.color,
+                        size: 22,
+                      ),
                       title: Text(
                         def.title,
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.ink),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w400,
+                          color: AppColors.ink,
+                        ),
                       ),
                       subtitle: Text(
                         def.description,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 11, color: AppColors.inkSecondary),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.inkSecondary,
+                        ),
                       ),
                       onTap: () => _addType(ref, context, def),
                     ),

@@ -27,10 +27,7 @@ class HomePage extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // 标题区
-                const PageHeader(
-                  title: '蓝点器',
-                  subtitle: 'Windows 自动化 · 蓝图工作流',
-                ),
+                const PageHeader(title: '蓝点器', subtitle: 'Windows 自动化 · 蓝图工作流'),
                 // 平台不支持提示
                 if (!automation.isSupported) ...[
                   const _UnsupportedBanner(),
@@ -84,7 +81,7 @@ class HomePage extends ConsumerWidget {
                         '我的脚本',
                         style: TextStyle(
                           fontSize: 20,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w500,
                           color: AppColors.ink,
                         ),
                       ),
@@ -119,9 +116,9 @@ class HomePage extends ConsumerWidget {
     final storage = ref.read(scriptStorageProvider);
     if (await storage.exists(name)) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已存在同名脚本，请换一个名称')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('已存在同名脚本，请换一个名称')));
       return;
     }
     final s = BlueprintScript(name: name)
@@ -304,7 +301,7 @@ class _EntryCard extends ConsumerWidget {
                       title,
                       style: const TextStyle(
                         fontSize: 16,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w500,
                         color: AppColors.ink,
                       ),
                     ),
@@ -430,7 +427,7 @@ class _ScriptRow extends ConsumerWidget {
                       s.name,
                       style: const TextStyle(
                         fontSize: 15,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w400,
                         color: AppColors.ink,
                       ),
                       maxLines: 1,
@@ -507,9 +504,9 @@ class _ScriptRow extends ConsumerWidget {
     final storage = ref.read(scriptStorageProvider);
     if (name != script.name && await storage.exists(name)) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已存在同名脚本，请换一个名称')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('已存在同名脚本，请换一个名称')));
       }
       return;
     }

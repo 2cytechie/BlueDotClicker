@@ -64,7 +64,7 @@ class _SideNav extends ConsumerWidget {
             '蓝点器',
             style: TextStyle(
               fontSize: 10,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w400,
               color: AppColors.inkSecondary,
             ),
             textAlign: TextAlign.center,
@@ -124,7 +124,7 @@ class _NavItem extends ConsumerWidget {
                   label,
                   style: TextStyle(
                     fontSize: 11,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    fontWeight: selected ? FontWeight.w500 : FontWeight.w300,
                     color: selected ? Colors.white : AppColors.inkSecondary,
                   ),
                 ),

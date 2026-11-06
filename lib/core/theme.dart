@@ -31,6 +31,12 @@ ThemeData buildAppTheme() {
   final base = ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
+    fontFamily: 'MiSans',
+    fontFamilyFallback: const [
+      'Microsoft YaHei UI',
+      'Microsoft YaHei',
+      'Segoe UI',
+    ],
     colorScheme: ColorScheme.dark(
       primary: AppColors.peacock,
       onPrimary: Colors.white,

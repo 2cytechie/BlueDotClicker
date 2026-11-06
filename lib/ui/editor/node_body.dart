@@ -11,12 +11,12 @@ import '../../state/providers.dart';
 /// [runningNodeId] 由编辑器页捕获 runnerProvider 状态后传入。
 fl.NodeWidgetBuilder nodeBodyBuilder({String? runningNodeId}) =>
     (context, node, state) => _NodeBodyContent(
-          node: node,
-          def: nodeDef(node.type),
-          categoryColor: nodeDef(node.type).category.color,
-          selected: state.isSelected,
-          highlight: node.id == runningNodeId,
-        );
+      node: node,
+      def: nodeDef(node.type),
+      categoryColor: nodeDef(node.type).category.color,
+      selected: state.isSelected,
+      highlight: node.id == runningNodeId,
+    );
 
 class _NodeBodyContent extends StatelessWidget {
   const _NodeBodyContent({
@@ -42,12 +42,25 @@ class _NodeBodyContent extends StatelessWidget {
         color: AppColors.moonWhite,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: highlight ? AppColors.success : (selected ? AppColors.peacock : AppColors.outline),
+          color: highlight
+              ? AppColors.success
+              : (selected ? AppColors.peacock : AppColors.outline),
           width: highlight || selected ? 2 : 1,
         ),
         boxShadow: highlight
-            ? [BoxShadow(color: AppColors.peacock.withValues(alpha: 0.35), blurRadius: 12)]
-            : const [BoxShadow(color: Color(0x14000000), blurRadius: 4, offset: Offset(0, 1))],
+            ? [
+                BoxShadow(
+                  color: AppColors.peacock.withValues(alpha: 0.35),
+                  blurRadius: 12,
+                ),
+              ]
+            : const [
+                BoxShadow(
+                  color: Color(0x14000000),
+                  blurRadius: 4,
+                  offset: Offset(0, 1),
+                ),
+              ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -58,7 +71,9 @@ class _NodeBodyContent extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 10),
             decoration: BoxDecoration(
               color: categoryColor,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(9)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(9),
+              ),
             ),
             child: Row(
               children: [
@@ -70,7 +85,10 @@ class _NodeBodyContent extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
               ],
@@ -90,12 +108,17 @@ class _NodeBodyContent extends StatelessWidget {
                         line,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 11, color: AppColors.inkSecondary),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.inkSecondary,
+                        ),
                       ),
                     ),
                   // 执行录制节点：显示所选录制（跟随录制重命名/删除实时更新）
                   if (node.type == 'playRecording')
-                    _RecordingSummary(recordingId: node.data['recordingId'] as String? ?? ''),
+                    _RecordingSummary(
+                      recordingId: node.data['recordingId'] as String? ?? '',
+                    ),
                 ],
               ),
             ),
@@ -125,7 +148,9 @@ class _NodeBodyContent extends StatelessWidget {
               if (v('mode') == 'direction') {
                 lines.add('方向 ${v('angle')}° 距离 ${v('distance')}');
               } else {
-                lines.add('(${v('startX')},${v('startY')}) → (${v('endX')},${v('endY')})');
+                lines.add(
+                  '(${v('startX')},${v('startY')}) → (${v('endX')},${v('endY')})',
+                );
               }
               lines.add('${v('durationMs')}ms');
             case 'scroll':
@@ -162,7 +187,9 @@ class _NodeBodyContent extends StatelessWidget {
         if (node.type != 'screenshot') {
           if (node.type == 'imageMatch') {
             final tpl = v('templatePath') ?? '';
-            lines.add('模板 ${tpl.isEmpty ? '未选择' : tpl.split('\\').last.split('/').last}');
+            lines.add(
+              '模板 ${tpl.isEmpty ? '未选择' : tpl.split('\\').last.split('/').last}',
+            );
             lines.add('阈值 ${v('threshold')}');
           }
           if (node.type == 'ocr') {
@@ -176,8 +203,12 @@ class _NodeBodyContent extends StatelessWidget {
           lines.add(node.type == 'screenshot' ? '全屏' : '全屏区域');
         }
       case 'condition':
-        lines.add('左值 ${v('leftVar')?.isEmpty == false ? v('leftVar') : v('leftConst')}');
-        lines.add('${_opLabel(v('op'))} 右值 ${v('rightVar')?.isEmpty == false ? v('rightVar') : v('rightConst')}');
+        lines.add(
+          '左值 ${v('leftVar')?.isEmpty == false ? v('leftVar') : v('leftConst')}',
+        );
+        lines.add(
+          '${_opLabel(v('op'))} 右值 ${v('rightVar')?.isEmpty == false ? v('rightVar') : v('rightConst')}',
+        );
       case 'loop':
         final count = v('count');
         lines.add(count == '0' ? '无限循环' : '循环 $count 次');
@@ -186,7 +217,9 @@ class _NodeBodyContent extends StatelessWidget {
       case 'setVar':
         lines.add('${v('name')} = ${v('const')}');
       case 'storage':
-        lines.add('${v('action') == 'save' ? '保存' : '读取'} ${v('key')} ↔ ${v('name')}');
+        lines.add(
+          '${v('action') == 'save' ? '保存' : '读取'} ${v('key')} ↔ ${v('name')}',
+        );
       case 'start':
         final c = v('count') ?? '1'; // 旧脚本无此参数时按默认 1 次
         lines.add(c == '0' ? '一直执行（F10 停止）' : '执行 $c 次');
@@ -203,21 +236,21 @@ class _NodeBodyContent extends StatelessWidget {
   }
 
   static String _buttonName(String? button) => switch (button) {
-        'right' => '右键',
-        'middle' => '中键',
-        _ => '左键',
-      };
+    'right' => '右键',
+    'middle' => '中键',
+    _ => '左键',
+  };
 
   String _opLabel(String? op) => switch (op) {
-        '==' => '等于',
-        '!=' => '不等于',
-        '>' => '大于',
-        '<' => '小于',
-        '>=' => '≥',
-        '<=' => '≤',
-        'contains' => '包含',
-        _ => '?',
-      };
+    '==' => '等于',
+    '!=' => '不等于',
+    '>' => '大于',
+    '<' => '小于',
+    '>=' => '≥',
+    '<=' => '≤',
+    'contains' => '包含',
+    _ => '?',
+  };
 }
 
 /// 执行录制节点的录制摘要：按 id 解析录制名（未选择/已删除给出提示）
@@ -231,8 +264,12 @@ class _RecordingSummary extends ConsumerWidget {
     const style = TextStyle(fontSize: 11, color: AppColors.inkSecondary);
     final async = ref.watch(recordingsProvider);
 
-    Widget line(String label) => Text('录制：$label',
-        maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
+    Widget line(String label) => Text(
+      '录制：$label',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: style,
+    );
 
     if (recordingId.isEmpty) return line('未选择录制');
     return async.when(

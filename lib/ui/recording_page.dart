@@ -223,9 +223,7 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
           icon: Icons.list_alt_rounded,
           // 立即回放按钮：放在「动作预览」标题文字右侧
           trailing: FilledButton.icon(
-            style: FilledButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-            ),
+            style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
             onPressed: replaying
                 ? null
                 : () {
@@ -425,7 +423,7 @@ class _HistoryPane extends ConsumerWidget {
                 '历史记录',
                 style: TextStyle(
                   fontSize: 15,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w400,
                   color: AppColors.ink,
                 ),
               ),
@@ -554,9 +552,7 @@ class _HistoryTileState extends ConsumerState<_HistoryTile> {
                           : Icons.videocam_outlined,
                       size: 20,
                     ),
-                    color: previewing
-                        ? AppColors.nodeLogic
-                        : AppColors.peacock,
+                    color: previewing ? AppColors.nodeLogic : AppColors.peacock,
                     onPressed: onPreview,
                   ),
                 ),
@@ -577,7 +573,7 @@ class _HistoryTileState extends ConsumerState<_HistoryTile> {
                             r.name,
                             style: const TextStyle(
                               fontSize: 14,
-                              fontWeight: FontWeight.w600,
+                              fontWeight: FontWeight.w400,
                               color: AppColors.ink,
                             ),
                           ),

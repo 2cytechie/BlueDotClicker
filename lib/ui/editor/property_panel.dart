@@ -63,9 +63,10 @@ class PropertyPanel extends ConsumerWidget {
     Map<String, Object?> data,
   ) => switch (type) {
     'mouse' => switch ('${data['action']}') {
-      'click' || 'doubleClick' || 'longPress' || 'press' => [
-        ('拾取坐标', 'x', 'y', 'button'),
-      ],
+      'click' ||
+      'doubleClick' ||
+      'longPress' ||
+      'press' => [('拾取坐标', 'x', 'y', 'button')],
       // 滚轮/移动只需要位置；抬起不需要坐标
       'scroll' || 'move' => [('拾取坐标', 'x', 'y', null)],
       'swipe' => [
@@ -86,8 +87,8 @@ class PropertyPanel extends ConsumerWidget {
     final targets = _pickTargets(node.type, data);
     if (targets.isEmpty) return const SizedBox.shrink();
     final action = '${data['action']}';
-    final recordsButton = node.type == 'mouse' &&
-        (action == 'click' || action == 'doubleClick');
+    final recordsButton =
+        node.type == 'mouse' && (action == 'click' || action == 'doubleClick');
 
     final pick = ref.watch(
       coordinatePickProvider.select(
@@ -175,15 +176,17 @@ class PropertyPanel extends ConsumerWidget {
               OutlinedButton.icon(
                 onPressed: busy
                     ? null
-                    : () => ref.read(keyPickProvider.notifier).start(
-                          controller: controller,
-                          target: KeyPickTarget(
-                            nodeId: node.id,
-                            paramKey: isCombo ? 'comboKeys' : 'vkCode',
-                            append: isCombo,
-                            label: isCombo ? '拾取组合键' : '拾取按键',
+                    : () => ref
+                          .read(keyPickProvider.notifier)
+                          .start(
+                            controller: controller,
+                            target: KeyPickTarget(
+                              nodeId: node.id,
+                              paramKey: isCombo ? 'comboKeys' : 'vkCode',
+                              append: isCombo,
+                              label: isCombo ? '拾取组合键' : '拾取按键',
+                            ),
                           ),
-                        ),
                 icon: const Icon(Icons.keyboard_rounded, size: 15),
                 label: Text(picking ? '拾取中…' : (isCombo ? '拾取组合键' : '拾取按键')),
               ),
@@ -214,8 +217,9 @@ class PropertyPanel extends ConsumerWidget {
   /// 再让坐标对左右并排（各占一半宽），其余字段一字段一行。
   List<Widget> _buildParamFields(WidgetRef ref, fl.GraphNode node) {
     final data = _effectiveData(node);
-    final params =
-        nodeDef(node.type).params.where((f) => f.visibleFor(data)).toList();
+    final params = nodeDef(
+      node.type,
+    ).params.where((f) => f.visibleFor(data)).toList();
     final children = <Widget>[];
     var i = 0;
     while (i < params.length) {
@@ -273,7 +277,7 @@ class PropertyPanel extends ConsumerWidget {
               '输入端口说明',
               style: TextStyle(
                 fontSize: 13,
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w400,
                 color: AppColors.ink,
               ),
             ),
@@ -434,7 +438,7 @@ class PropertyPanel extends ConsumerWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 15,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w500,
                             color: AppColors.ink,
                           ),
                         ),
@@ -507,7 +511,7 @@ class PropertyPanel extends ConsumerWidget {
                 '该节点类型已移除',
                 style: TextStyle(
                   fontSize: 13,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w400,
                   color: AppColors.danger,
                 ),
               ),
@@ -558,7 +562,7 @@ class PropertyPanel extends ConsumerWidget {
                   '注释',
                   style: TextStyle(
                     fontSize: 15,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w500,
                     color: AppColors.ink,
                   ),
                 ),
@@ -1015,7 +1019,7 @@ class _PortDocHeader extends StatelessWidget {
             exec ? '执行流' : '数据',
             style: TextStyle(
               fontSize: 11,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w400,
               color: color,
             ),
           ),
@@ -1028,7 +1032,7 @@ class _PortDocHeader extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               fontSize: 13,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w400,
               color: AppColors.ink,
             ),
           ),
@@ -1136,7 +1140,7 @@ class _MediaTestResultDialog extends StatelessWidget {
           Expanded(
             child: Text(
               result.title,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
             ),
           ),
         ],
