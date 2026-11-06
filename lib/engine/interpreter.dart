@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 
 import '../models/blueprint.dart';
+import '../models/key_names.dart';
 import '../platform/platform_automation.dart';
 import '../platform/recording.dart' show replayActions;
 import '../services/recognition.dart';
@@ -15,14 +16,12 @@ import 'variables.dart';
 class EngineHooks {
   final void Function(String message) log;
   final void Function(String? nodeId) onNodeChange;
-  final Future<BlueprintScript?> Function(String name) loadScript;
 
   /// 按 id 加载录制（「执行录制」节点用），找不到返回 null
   final Future<Recording?> Function(String id) loadRecording;
   const EngineHooks({
     required this.log,
     required this.onNodeChange,
-    required this.loadScript,
     this.loadRecording = _defaultLoadRecording,
   });
 
@@ -45,7 +44,6 @@ class BlueprintInterpreter {
   VariableTable vars = VariableTable();
   bool _stopped = false;
   bool _running = false;
-  int _depth = 0;
 
   /// 最近一次截图（screenshot/ocr/imageMatch 节点共享）
   RawImage? _lastImage;
@@ -59,6 +57,10 @@ class BlueprintInterpreter {
   /// 循环节点剩余计数（-1 = 无限）
   final Map<String, int> _loopRemaining = {};
 
+  /// 「按住/按下」后尚未抬起的输入：停止或结束时统一释放，避免卡住用户桌面
+  final Set<MouseButton> _pressedButtons = {};
+  final Set<int> _pressedKeys = {};
+
   bool get isRunning => _running;
 
   void stop() => _stopped = true;
@@ -71,6 +73,8 @@ class BlueprintInterpreter {
     _lastImage = null;
     _portValues.clear();
     _loopRemaining.clear();
+    _pressedButtons.clear();
+    _pressedKeys.clear();
     try {
       final start = script.findStart();
       if (start == null) {
@@ -98,6 +102,7 @@ class BlueprintInterpreter {
     } catch (e) {
       hooks.log('✗ 执行异常：$e');
     } finally {
+      await _releaseHeldInputs();
       hooks.onNodeChange(null);
       _running = false;
     }
@@ -136,36 +141,12 @@ class BlueprintInterpreter {
       case 'start':
         return 'out';
 
-      case 'click':
-        final x = _paramInt(n, 'x', 'x');
-        final y = _paramInt(n, 'y', 'y');
-        final button = _mouseButton(n.params['button']);
-        await automation.click(x, y, button: button);
-        hooks.log('点击 ($x, $y)${_buttonLabel(button)}');
+      case 'mouse':
+        await _executeMouse(n);
         return 'out';
 
-      case 'doubleClick':
-        final x = _paramInt(n, 'x', 'x');
-        final y = _paramInt(n, 'y', 'y');
-        final button = _mouseButton(n.params['button']);
-        await automation.click(x, y, button: button, count: 2);
-        hooks.log('双击 ($x, $y)${_buttonLabel(button)}');
-        return 'out';
-
-      case 'swipe':
-        final (x1, y1) = _swipeStart(n);
-        final (x2, y2) = _swipeEnd(n);
-        final dur = (n.params['durationMs'] as num?)?.toInt() ?? 300;
-        await automation.swipe(x1, y1, x2, y2, durationMs: dur);
-        hooks.log('滑动 ($x1,$y1) → ($x2,$y2) ${dur}ms');
-        return 'out';
-
-      case 'longPress':
-        final x = (n.params['x'] as num?)?.toInt() ?? 0;
-        final y = (n.params['y'] as num?)?.toInt() ?? 0;
-        final dur = (n.params['durationMs'] as num?)?.toInt() ?? 800;
-        await automation.longPress(x, y, durationMs: dur);
-        hooks.log('长按 ($x, $y) ${dur}ms');
+      case 'keyboard':
+        await _executeKeyboard(n);
         return 'out';
 
       case 'playRecording':
@@ -278,12 +259,7 @@ class BlueprintInterpreter {
         {
           final ms = (n.params['ms'] as num?)?.toInt() ?? 0;
           hooks.log('延时 ${ms}ms');
-          var left = ms.clamp(0, 3600000);
-          while (left > 0 && !_stopped) {
-            final step = math.min(left, 50);
-            await Future<void>.delayed(Duration(milliseconds: step));
-            left -= step;
-          }
+          await _sleep(ms.clamp(0, 3600000));
           return 'out';
         }
 
@@ -323,41 +299,156 @@ class BlueprintInterpreter {
           return 'out';
         }
 
-      case 'subScript':
+      default:
+        // 用不存在的端口名让执行流在此中断：旧脚本里该节点之后的操作
+        // 语义已不可知，继续执行可能造成比停下更危险的结果。
+        hooks.log('✗ 节点类型已移除或未知：${n.type}（执行流已中断）');
+        return '__halt__';
+    }
+  }
+
+  // ---- 鼠标 / 键盘动作 ----
+
+  Future<void> _executeMouse(BPNode n) async {
+    final action = (n.params['action'] as String?) ?? 'click';
+    final x = _paramInt(n, 'x');
+    final y = _paramInt(n, 'y');
+    final button = _mouseButton(n.params['button']);
+    switch (action) {
+      case 'click':
+        await automation.click(x, y, button: button);
+        hooks.log('单击 ($x, $y)${_buttonLabel(button)}');
+      case 'doubleClick':
+        await automation.click(x, y, button: button, count: 2);
+        hooks.log('双击 ($x, $y)${_buttonLabel(button)}');
+      case 'swipe':
         {
-          final name = ((n.params['scriptName'] as String?) ?? '').trim();
-          if (name.isEmpty) {
-            hooks.log('子脚本调用失败：未指定脚本');
-            return 'out';
+          final (x1, y1) = _swipeStart(n);
+          final (x2, y2) = _swipeEnd(n);
+          final dur = (n.params['durationMs'] as num?)?.toInt() ?? 300;
+          await automation.swipe(x1, y1, x2, y2, durationMs: dur);
+          hooks.log('滑动 ($x1,$y1) → ($x2,$y2) ${dur}ms');
+        }
+      case 'longPress':
+        {
+          final hold = (n.params['holdMs'] as num?)?.toInt() ?? 800;
+          await automation.longPress(x, y, durationMs: hold, button: button);
+          hooks.log('长按 ($x, $y) ${hold}ms ${_buttonName(button)}');
+        }
+      case 'scroll':
+        {
+          final dx = _paramInt(n, 'dx');
+          final dy = _paramInt(n, 'dy');
+          await automation.scrollWheel(x, y, dy: dy, dx: dx);
+          hooks.log('滚轮 ($x, $y) dx=$dx dy=$dy');
+        }
+      case 'move':
+        await automation.moveMouse(x, y);
+        hooks.log('移动鼠标 ($x, $y)');
+      case 'press':
+        await automation.press(x, y, button: button);
+        _pressedButtons.add(button);
+        hooks.log('按住 ($x, $y) ${_buttonName(button)}（需后续「抬起」）');
+      case 'release':
+        await automation.release(button: button);
+        _pressedButtons.remove(button);
+        hooks.log('抬起 ${_buttonName(button)}');
+      default:
+        hooks.log('鼠标操作失败：未知动作 "$action"');
+    }
+  }
+
+  Future<void> _executeKeyboard(BPNode n) async {
+    final action = (n.params['action'] as String?) ?? 'tap';
+    final duration = ((n.params['durationMs'] as num?)?.toInt() ?? 60).clamp(0, 60000);
+    switch (action) {
+      case 'tap':
+        {
+          final vk = _vkCode(n);
+          if (vk == 0) {
+            hooks.log('键盘操作失败：未设置按键');
+            break;
           }
-          if (_depth >= 8) {
-            hooks.log('子脚本调用失败：递归深度超限');
-            return 'out';
+          await automation.keyTap(vk, durationMs: duration, extended: isExtendedKey(vk));
+          hooks.log('按键 ${keyLabel(vk)}');
+        }
+      case 'down':
+        {
+          final vk = _vkCode(n);
+          if (vk == 0) {
+            hooks.log('键盘操作失败：未设置按键');
+            break;
           }
-          final sub = await hooks.loadScript(name);
-          if (sub == null) {
-            hooks.log('子脚本调用失败：找不到脚本 "$name"');
-            return 'out';
+          await automation.keyDown(vk, extended: isExtendedKey(vk));
+          _pressedKeys.add(vk);
+          hooks.log('按下 ${keyLabel(vk)}（需后续「抬起」）');
+        }
+      case 'up':
+        {
+          final vk = _vkCode(n);
+          if (vk == 0) {
+            hooks.log('键盘操作失败：未设置按键');
+            break;
           }
-          hooks.log('调用子脚本: $name');
-          _depth++;
-          try {
-            final subInterp = BlueprintInterpreter(
-              automation: automation,
-              recognition: recognition,
-              hooks: hooks,
-            )
-              .._depth = _depth;
-            await subInterp.run(sub);
-            if (subInterp._stopped) _stopped = true;
-          } finally {
-            _depth--;
+          await automation.keyUp(vk, extended: isExtendedKey(vk));
+          _pressedKeys.remove(vk);
+          hooks.log('抬起 ${keyLabel(vk)}');
+        }
+      case 'combo':
+        {
+          final keys = parseKeyList(n.params['comboKeys']);
+          if (keys.isEmpty) {
+            hooks.log('键盘操作失败：未设置组合键');
+            break;
           }
-          return 'out';
+          for (final vk in keys) {
+            if (_stopped) break;
+            await automation.keyDown(vk, extended: isExtendedKey(vk));
+            _pressedKeys.add(vk);
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+          }
+          await _sleep(duration);
+          for (final vk in keys.reversed) {
+            await automation.keyUp(vk, extended: isExtendedKey(vk));
+            _pressedKeys.remove(vk);
+            await Future<void>.delayed(const Duration(milliseconds: 20));
+          }
+          hooks.log('组合键 ${formatKeyList(keys)}');
         }
       default:
-        hooks.log('未知节点类型: ${n.type}');
-        return 'out';
+        hooks.log('键盘操作失败：未知动作 "$action"');
+    }
+  }
+
+  /// 释放脚本遗留的按下状态（停止/异常/结束都走这里）
+  Future<void> _releaseHeldInputs() async {
+    if (_pressedKeys.isNotEmpty) {
+      for (final vk in _pressedKeys.toList()) {
+        try {
+          await automation.keyUp(vk, extended: isExtendedKey(vk));
+        } catch (_) {}
+      }
+      _pressedKeys.clear();
+      hooks.log('已释放未抬起的按键');
+    }
+    if (_pressedButtons.isNotEmpty) {
+      for (final button in _pressedButtons.toList()) {
+        try {
+          await automation.release(button: button);
+        } catch (_) {}
+      }
+      _pressedButtons.clear();
+      hooks.log('已释放未抬起的鼠标键');
+    }
+  }
+
+  /// 可中止的等待（每 50ms 检查一次停止标志）
+  Future<void> _sleep(int ms) async {
+    var left = ms;
+    while (left > 0 && !_stopped) {
+      final step = math.min(left, 50);
+      await Future<void>.delayed(Duration(milliseconds: step));
+      left -= step;
     }
   }
 
@@ -373,8 +464,14 @@ class BlueprintInterpreter {
     if (score != null) _writeOut(n, 'score', score);
   }
 
-  int _paramInt(BPNode n, String key, String varKey) {
+  int _paramInt(BPNode n, String key) {
     final v = n.params[key];
+    if (v is num) return v.toInt();
+    return int.tryParse('$v') ?? 0;
+  }
+
+  int _vkCode(BPNode n) {
+    final v = n.params['vkCode'];
     if (v is num) return v.toInt();
     return int.tryParse('$v') ?? 0;
   }
@@ -392,20 +489,26 @@ class BlueprintInterpreter {
         _ => '',
       };
 
+  String _buttonName(MouseButton b) => switch (b) {
+        MouseButton.right => '右键',
+        MouseButton.middle => '中键',
+        _ => '左键',
+      };
+
   (int, int) _swipeStart(BPNode n) =>
-      ((n.params['startX'] as num?)?.toInt() ?? 0, (n.params['startY'] as num?)?.toInt() ?? 0);
+      (_paramInt(n, 'startX'), _paramInt(n, 'startY'));
 
   (int, int) _swipeEnd(BPNode n) {
     final mode = (n.params['mode'] as String?) ?? 'coords';
     if (mode == 'direction') {
       final angleDeg = (n.params['angle'] as num?)?.toDouble() ?? 0;
-      final dist = (n.params['distance'] as num?)?.toInt() ?? 200;
+      final dist = _paramInt(n, 'distance');
       final rad = -angleDeg * math.pi / 180; // 屏幕Y向下，角度逆时针为正
-      final sx = (n.params['startX'] as num?)?.toInt() ?? 0;
-      final sy = (n.params['startY'] as num?)?.toInt() ?? 0;
+      final sx = _paramInt(n, 'startX');
+      final sy = _paramInt(n, 'startY');
       return (sx + (dist * math.cos(rad)).round(), sy + (dist * math.sin(rad)).round());
     }
-    return ((n.params['endX'] as num?)?.toInt() ?? 0, (n.params['endY'] as num?)?.toInt() ?? 0);
+    return (_paramInt(n, 'endX'), _paramInt(n, 'endY'));
   }
 
   RectPx? _region(BPNode n) {
@@ -496,4 +599,3 @@ class BlueprintInterpreter {
     return s.length > 32 ? '${s.substring(0, 32)}…' : s;
   }
 }
-

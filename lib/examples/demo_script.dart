@@ -30,10 +30,10 @@ BlueprintScript buildDemoScript() {
     ),
     'demo_click': BPNode(
       id: 'demo_click',
-      type: 'click',
+      type: 'mouse',
       x: 340,
       y: 620,
-      params: {'x': 500, 'y': 400},
+      params: {'action': 'click', 'x': 500, 'y': 400, 'button': 'left'},
     ),
     'demo_setvar2': BPNode(
       id: 'demo_setvar2',

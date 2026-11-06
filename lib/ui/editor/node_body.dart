@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme.dart';
+import '../../models/key_names.dart';
 import '../../models/node_types.dart';
 import '../../state/providers.dart';
 
@@ -103,32 +104,58 @@ class _NodeBodyContent extends StatelessWidget {
     );
   }
 
-  /// 参数摘要（最多 4 行），跳过 useRegion=false 时的区域字段
+  /// 参数摘要（最多 4 行）：按节点当前动作只列出适用参数
   List<String> _summaryLines() {
     final lines = <String>[];
-    String? v(String key) {
-      final value = node.data[key];
-      if (value == null) return null;
-      final s = '$value';
-      return s;
+    // 默认值 + 当前值补齐（动作切换后旧数据可能缺字段）
+    final data = <String, Object?>{};
+    for (final f in def.params) {
+      data[f.key] = f.defaultValue;
     }
+    data.addAll(node.data);
+    String? v(String key) => data[key]?.toString();
 
     switch (node.type) {
-      case 'click':
-      case 'doubleClick':
-        lines.add('位置 (${v('x')}, ${v('y')})');
-        if (v('button') == 'right') lines.add('右键');
-        if (v('button') == 'middle') lines.add('中键');
-      case 'swipe':
-        if (v('mode') == 'direction') {
-          lines.add('方向 ${v('angle')}° 距离 ${v('distance')}');
-        } else {
-          lines.add('(${v('startX')},${v('startY')}) → (${v('endX')},${v('endY')})');
+      case 'mouse':
+        {
+          final action = v('action') ?? 'click';
+          lines.add('动作：${mouseActionLabel(action)}');
+          switch (action) {
+            case 'swipe':
+              if (v('mode') == 'direction') {
+                lines.add('方向 ${v('angle')}° 距离 ${v('distance')}');
+              } else {
+                lines.add('(${v('startX')},${v('startY')}) → (${v('endX')},${v('endY')})');
+              }
+              lines.add('${v('durationMs')}ms');
+            case 'scroll':
+              lines.add('(${v('x')}, ${v('y')})');
+              lines.add('dx=${v('dx')} dy=${v('dy')}');
+            case 'move':
+              lines.add('→ (${v('x')}, ${v('y')})');
+            case 'release':
+              lines.add(_buttonName(v('button')));
+            case 'longPress':
+              lines.add('(${v('x')}, ${v('y')}) ${_buttonName(v('button'))}');
+              lines.add('保持 ${v('holdMs')}ms');
+            default: // click / doubleClick / press
+              lines.add('(${v('x')}, ${v('y')}) ${_buttonName(v('button'))}');
+          }
         }
-        lines.add('${v('durationMs')}ms');
-      case 'longPress':
-        lines.add('位置 (${v('x')}, ${v('y')})');
-        lines.add('保持 ${v('durationMs')}ms');
+      case 'keyboard':
+        {
+          final action = v('action') ?? 'tap';
+          lines.add('动作：${keyboardActionLabel(action)}');
+          if (action == 'combo') {
+            final combo = formatKeyList(parseKeyList(data['comboKeys']));
+            lines.add(combo.isEmpty ? '未设置组合键' : combo);
+          } else {
+            lines.add(keyLabel(_asInt(data['vkCode'])));
+          }
+          if (action == 'tap' || action == 'combo') {
+            lines.add('按住 ${v('durationMs')}ms');
+          }
+        }
       case 'screenshot':
       case 'ocr':
       case 'imageMatch':
@@ -160,15 +187,26 @@ class _NodeBodyContent extends StatelessWidget {
         lines.add('${v('name')} = ${v('const')}');
       case 'storage':
         lines.add('${v('action') == 'save' ? '保存' : '读取'} ${v('key')} ↔ ${v('name')}');
-      case 'subScript':
-        final s = v('scriptName');
-        lines.add(s?.isEmpty == false ? '调用「$s」' : '未选择脚本');
       case 'start':
         final c = v('count') ?? '1'; // 旧脚本无此参数时按默认 1 次
         lines.add(c == '0' ? '一直执行（F10 停止）' : '执行 $c 次');
+      default:
+        // 已移除/未知类型：显式提示，避免看起来像正常节点
+        lines.add('已移除的类型：${node.type}');
     }
     return lines;
   }
+
+  static int _asInt(Object? v) {
+    if (v is num) return v.toInt();
+    return int.tryParse('$v') ?? 0;
+  }
+
+  static String _buttonName(String? button) => switch (button) {
+        'right' => '右键',
+        'middle' => '中键',
+        _ => '左键',
+      };
 
   String _opLabel(String? op) => switch (op) {
         '==' => '等于',

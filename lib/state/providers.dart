@@ -5,8 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../engine/interpreter.dart';
 import '../models/blueprint.dart';
+import '../models/key_names.dart';
 import '../platform/automation_factory.dart';
 import '../platform/coordinate_picker.dart';
+import '../platform/key_picker.dart';
 import '../platform/platform_automation.dart';
 import '../platform/recording.dart';
 import '../services/media_tester.dart';
@@ -235,6 +237,90 @@ final coordinatePickProvider =
       CoordinatePickNotifier.new,
     );
 
+// ---- 全局按键拾取 ----
+
+/// 一次按键拾取目标：确认后把虚拟键码写入哪个节点的哪个参数
+class KeyPickTarget {
+  final String nodeId;
+
+  /// 写入的参数键（'vkCode' 单键 / 'comboKeys' 组合键列表）
+  final String paramKey;
+
+  /// true = 追加到组合键列表；false = 覆盖单键
+  final bool append;
+
+  /// 悬浮提示标签（「拾取按键」…）
+  final String label;
+  const KeyPickTarget({
+    required this.nodeId,
+    required this.paramKey,
+    this.append = false,
+    required this.label,
+  });
+}
+
+class KeyPickState {
+  final KeyPickTarget? target; // null = 空闲
+  final int? pressedVk; // 最近命中的键（UI 反馈用）
+  const KeyPickState({this.target, this.pressedVk});
+
+  bool get active => target != null;
+}
+
+class KeyPickNotifier extends Notifier<KeyPickState> {
+  /// provider 被销毁后异步恢复的代码不得再写 state
+  bool _alive = true;
+
+  @override
+  KeyPickState build() {
+    _alive = true;
+    ref.onDispose(() => _alive = false);
+    return const KeyPickState();
+  }
+
+  KeyPicker get _picker => ref.read(keyPickerProvider);
+
+  void _set(KeyPickState s) {
+    if (_alive) state = s;
+  }
+
+  /// 开始拾取；确认后经 [controller] 写回节点（支持撤销/重做）。
+  Future<void> start({
+    required fl.NodeEditorController controller,
+    required KeyPickTarget target,
+  }) async {
+    if (state.active) return;
+    if (!ref.read(automationProvider).isSupported) return;
+    _set(KeyPickState(target: target));
+    final vk = await _picker.pickKey(
+      onKey: (v) => _set(KeyPickState(target: target, pressedVk: v)),
+    );
+    if (vk != null && controller.graph.nodes.containsKey(target.nodeId)) {
+      controller.updateNode(target.nodeId, (n) {
+        if (target.append) {
+          final keys = parseKeyList(n.data[target.paramKey]);
+          if (!keys.contains(vk)) keys.add(vk);
+          return n.withData({target.paramKey: keys});
+        }
+        return n.withData({target.paramKey: vk});
+      });
+    }
+    _set(const KeyPickState());
+  }
+
+  /// UI 主动取消（页面卸载兜底；provider 已销毁时为 no-op）
+  void cancel() {
+    if (!_alive) return;
+    _picker.cancel();
+    _set(const KeyPickState());
+  }
+}
+
+final keyPickerProvider = Provider<KeyPicker>((ref) => KeyPicker());
+
+final keyPickProvider =
+    NotifierProvider<KeyPickNotifier, KeyPickState>(KeyPickNotifier.new);
+
 // ---- 蓝图运行状态 ----
 
 class RunnerState {
@@ -284,7 +370,6 @@ class RunnerNotifier extends Notifier<RunnerState> {
       hooks: EngineHooks(
         log: (m) => _appendLog(m),
         onNodeChange: (id) => state = state.copyWith(currentNodeId: id),
-        loadScript: (name) => ref.read(scriptStorageProvider).load(name),
         loadRecording: (id) => ref.read(recordingStorageProvider).loadById(id),
       ),
     );

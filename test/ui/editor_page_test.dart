@@ -39,7 +39,7 @@ class _GatedScriptStorage extends ScriptStorage {
 BlueprintScript _script(String name) {
   final s = BlueprintScript(name: name);
   s.nodes['n_start'] = BPNode(id: 'n_start', type: 'start', x: 0, y: 0);
-  s.nodes['n_click'] = BPNode(id: 'n_click', type: 'click', x: 200, y: 0);
+  s.nodes['n_click'] = BPNode(id: 'n_click', type: 'mouse', x: 200, y: 0);
   s.edges['e1'] = BPEdge(
     id: 'e1',
     from: const PortRef(nodeId: 'n_start', port: 'out'),

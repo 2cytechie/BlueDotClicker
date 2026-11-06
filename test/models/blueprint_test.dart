@@ -17,7 +17,7 @@ void main() {
         y: 20,
         params: {},
       );
-      s.nodes['n2'] = BPNode(id: 'n2', type: 'click', x: 200, y: 120)
+      s.nodes['n2'] = BPNode(id: 'n2', type: 'mouse', x: 200, y: 120)
         ..params['x'] = 500
         ..params['y'] = 300
         ..params['fingers'] = 3

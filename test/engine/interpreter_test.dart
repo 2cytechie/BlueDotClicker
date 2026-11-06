@@ -42,13 +42,13 @@ class MockAutomation implements PlatformAutomation {
   @override
   Future<void> press(int x, int y, {MouseButton button = MouseButton.left}) async {
     _check();
-    calls.add('press($x,$y)');
+    calls.add('press($x,$y,${button.name})');
   }
 
   @override
   Future<void> release({MouseButton button = MouseButton.left}) async {
     _check();
-    calls.add('release');
+    calls.add('release(${button.name})');
   }
 
   @override
@@ -60,7 +60,7 @@ class MockAutomation implements PlatformAutomation {
   @override
   Future<void> longPress(int x, int y, {int durationMs = 800, MouseButton button = MouseButton.left}) async {
     _check();
-    calls.add('longPress($x,$y,$durationMs)');
+    calls.add('longPress($x,$y,$durationMs,${button.name})');
   }
 
   @override
@@ -116,17 +116,15 @@ class MockRecognition implements RecognitionService {
       const MatchResult(true, 50, 60, 0.95);
 }
 
-/// 测试钩子集合：捕获日志/节点高亮，支持注入子脚本/录制
+/// 测试钩子集合：捕获日志/节点高亮，支持注入录制
 class Hooks {
   final List<String> logs = [];
   final List<String?> nodeChanges = [];
-  BlueprintScript? subScript;
   Recording? recording;
 
   late final EngineHooks engineHooks = EngineHooks(
     log: logs.add,
     onNodeChange: nodeChanges.add,
-    loadScript: (name) async => name == 'sub' ? subScript : null,
     loadRecording: (id) async => id == recording?.id ? recording : null,
   );
 }
@@ -147,6 +145,23 @@ BPNode _node(String id, String type, [Map<String, dynamic>? params]) =>
 
 BPEdge _edge(String id, String from, String fromPort, String to, String toPort, {EdgeKind kind = EdgeKind.exec}) =>
     BPEdge(id: id, from: PortRef(nodeId: from, port: fromPort), to: PortRef(nodeId: to, port: toPort), kind: kind);
+
+/// 鼠标操作节点（默认动作 click）
+BPNode _mouse(String id, String action, [Map<String, dynamic>? extra]) => BPNode(
+      id: id,
+      type: 'mouse',
+      x: 0,
+      y: 0,
+      params: {'action': action, ...?extra},
+    );
+
+BPNode _keyboard(String id, String action, [Map<String, dynamic>? extra]) => BPNode(
+      id: id,
+      type: 'keyboard',
+      x: 0,
+      y: 0,
+      params: {'action': action, ...?extra},
+    );
 
 Future<VariableTable> _run(BlueprintScript s, {MockAutomation? auto, Hooks? hooks}) async {
   final automation = auto ?? MockAutomation();
@@ -178,11 +193,11 @@ void main() {
   });
 
   group('执行引擎', () {
-    test('顺序执行：开始→延时→点击', () async {
+    test('顺序执行：开始→延时→单击', () async {
       final s = _build([
         _node('a', 'start'),
         _node('b', 'delay', {'ms': 1}),
-        _node('c', 'click', {'x': 10, 'y': 20, 'fingers': 1, 'button': 'left'}),
+        _mouse('c', 'click', {'x': 10, 'y': 20, 'button': 'left'}),
       ], [
         _edge('e1', 'a', 'out', 'b', 'in'),
         _edge('e2', 'b', 'out', 'c', 'in'),
@@ -196,7 +211,7 @@ void main() {
     test('开始节点执行次数：整条链重复执行', () async {
       final s = _build([
         _node('a', 'start', {'count': 3}),
-        _node('c', 'click', {'x': 1, 'y': 2, 'button': 'left'}),
+        _mouse('c', 'click', {'x': 1, 'y': 2, 'button': 'left'}),
       ], [
         _edge('e1', 'a', 'out', 'c', 'in'),
       ]);
@@ -205,25 +220,109 @@ void main() {
       expect(auto.calls.where((c) => c == 'click(1,2,count:1,left)').length, 3);
     });
 
-    test('双击节点：以 count:2 执行并传递按键类型', () async {
+    test('鼠标动作：双击/滚轮/移动/按住/抬起/长按', () async {
       final s = _build([
         _node('a', 'start'),
-        _node('d', 'doubleClick', {'x': 5, 'y': 6, 'button': 'middle'}),
+        _mouse('d', 'doubleClick', {'x': 5, 'y': 6, 'button': 'middle'}),
+        _mouse('sc', 'scroll', {'x': 7, 'y': 8, 'dx': 0, 'dy': 240}),
+        _mouse('mv', 'move', {'x': 9, 'y': 10}),
+        _mouse('pr', 'press', {'x': 11, 'y': 12, 'button': 'right'}),
+        _mouse('rl', 'release', {'button': 'right'}),
+        _mouse('lp', 'longPress', {'x': 13, 'y': 14, 'holdMs': 1, 'button': 'middle'}),
       ], [
         _edge('e1', 'a', 'out', 'd', 'in'),
+        _edge('e2', 'd', 'out', 'sc', 'in'),
+        _edge('e3', 'sc', 'out', 'mv', 'in'),
+        _edge('e4', 'mv', 'out', 'pr', 'in'),
+        _edge('e5', 'pr', 'out', 'rl', 'in'),
+        _edge('e6', 'rl', 'out', 'lp', 'in'),
       ]);
       final auto = MockAutomation();
       await _run(s, auto: auto);
       expect(auto.calls, contains('click(5,6,count:2,middle)'));
+      expect(auto.calls, contains('scrollWheel(7,8,dy:240,dx:0)'));
+      expect(auto.calls, contains('move(9,10)'));
+      expect(auto.calls, contains('press(11,12,right)'));
+      expect(auto.calls, contains('release(right)'));
+      expect(auto.calls, contains('longPress(13,14,1,middle)'));
+    });
+
+    test('键盘动作：按键/组合键/按下/抬起', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _keyboard('t', 'tap', {'vkCode': 0x41}), // A
+        _keyboard('dn', 'down', {'vkCode': 0x10}), // Shift
+        _keyboard('up', 'up', {'vkCode': 0x10}),
+        _keyboard('cb', 'combo', {'comboKeys': [0x11, 0x43], 'durationMs': 1}), // Ctrl+C
+      ], [
+        _edge('e1', 'a', 'out', 't', 'in'),
+        _edge('e2', 't', 'out', 'dn', 'in'),
+        _edge('e3', 'dn', 'out', 'up', 'in'),
+        _edge('e4', 'up', 'out', 'cb', 'in'),
+      ]);
+      final auto = MockAutomation();
+      await _run(s, auto: auto);
+      expect(auto.calls, contains('keyTap(65,60,ext:false)'));
+      expect(auto.calls, contains('keyDown(16,ext:false)'));
+      expect(auto.calls, contains('keyUp(16,ext:false)'));
+      // 组合键：顺序按下、逆序抬起
+      final comboDown = auto.calls.indexOf('keyDown(17,ext:false)');
+      final comboCDown = auto.calls.indexOf('keyDown(67,ext:false)');
+      final cUp = auto.calls.indexOf('keyUp(67,ext:false)');
+      final ctrlUp = auto.calls.indexOf('keyUp(17,ext:false)');
+      expect(comboDown, greaterThanOrEqualTo(0));
+      expect(comboCDown, greaterThan(comboDown));
+      expect(cUp, greaterThan(comboCDown));
+      expect(ctrlUp, greaterThan(cUp));
+    });
+
+    test('键盘动作未设置按键时记日志并跳过，不抛异常', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _keyboard('k', 'tap', {'vkCode': 0}),
+        _keyboard('c', 'combo', {'comboKeys': <int>[]}),
+      ], [
+        _edge('e1', 'a', 'out', 'k', 'in'),
+        _edge('e2', 'k', 'out', 'c', 'in'),
+      ]);
+      final hooks = Hooks();
+      await _run(s, hooks: hooks);
+      final logs = hooks.logs.join('\n');
+      expect(logs, contains('未设置按键'));
+      expect(logs, contains('未设置组合键'));
+    });
+
+    test('停止时释放未抬起的鼠标键与按键', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _mouse('pr', 'press', {'x': 1, 'y': 2, 'button': 'left'}),
+        _keyboard('dn', 'down', {'vkCode': 0x41}),
+        _node('d', 'delay', {'ms': 5000}),
+      ], [
+        _edge('e1', 'a', 'out', 'pr', 'in'),
+        _edge('e2', 'pr', 'out', 'dn', 'in'),
+        _edge('e3', 'dn', 'out', 'd', 'in'),
+      ]);
+      final auto = MockAutomation();
+      final hooks = Hooks();
+      final engine = BlueprintInterpreter(
+        automation: auto,
+        recognition: MockRecognition(),
+        hooks: hooks.engineHooks,
+      );
+      Future<void>.delayed(const Duration(milliseconds: 80), engine.stop);
+      await engine.run(s);
+      expect(auto.calls, contains('release(left)'));
+      expect(auto.calls, contains('keyUp(65,ext:false)'));
     });
 
     test('条件分支走向 true/false 出口', () async {
-      // found == true → 点击；否则长按
+      // found == true → 单击；否则长按
       final s = BlueprintScript(name: 'cond')..variables['found'] = true;
       s.nodes['a'] = _node('a', 'start');
       s.nodes['cond'] = _node('cond', 'condition', {'op': '==', 'leftVar': 'found', 'rightConst': 'true'});
-      s.nodes['yes'] = _node('yes', 'click', {'x': 1, 'y': 1, 'fingers': 1, 'button': 'left'});
-      s.nodes['no'] = _node('no', 'longPress', {'x': 2, 'y': 2, 'durationMs': 1});
+      s.nodes['yes'] = _mouse('yes', 'click', {'x': 1, 'y': 1, 'button': 'left'});
+      s.nodes['no'] = _mouse('no', 'longPress', {'x': 2, 'y': 2, 'holdMs': 1});
       s.edges['e1'] = _edge('e1', 'a', 'out', 'cond', 'in');
       s.edges['e2'] = _edge('e2', 'cond', 'true', 'yes', 'in');
       s.edges['e3'] = _edge('e3', 'cond', 'false', 'no', 'in');
@@ -231,13 +330,13 @@ void main() {
       final auto = MockAutomation();
       await _run(s, auto: auto);
       expect(auto.calls, contains('click(1,1,count:1,left)'));
-      expect(auto.calls, isNot(contains('longPress(2,2,1)')));
+      expect(auto.calls.any((c) => c.startsWith('longPress')), isFalse);
 
       // 改变量为 false 走另一分支
       s.variables['found'] = false;
       final auto2 = MockAutomation();
       await _run(s, auto: auto2);
-      expect(auto2.calls, contains('longPress(2,2,1)'));
+      expect(auto2.calls.any((c) => c.startsWith('longPress')), isTrue);
     });
 
     test('循环执行 N 次后完成', () async {
@@ -250,9 +349,8 @@ void main() {
         _edge('e2', 'loop', 'body', 'd', 'in'),
         _edge('e3', 'd', 'out', 'loop', 'continue'),
       ]);
-      final auto = MockAutomation();
       final hooks = Hooks();
-      await _run(s, auto: auto, hooks: hooks);
+      await _run(s, hooks: hooks);
       final logs = hooks.logs.where((l) => l.contains('循环 → body')).length;
       expect(logs, 3);
     });
@@ -262,7 +360,7 @@ void main() {
         _node('a', 'start'),
         _node('set', 'setVar', {'name': 'score', 'const': '88'}),
         _node('cond', 'condition', {'op': '>', 'leftVar': 'score', 'rightConst': '60'}),
-        _node('ok', 'click', {'x': 9, 'y': 9, 'fingers': 1, 'button': 'left'}),
+        _mouse('ok', 'click', {'x': 9, 'y': 9, 'button': 'left'}),
       ], [
         _edge('e1', 'a', 'out', 'set', 'in'),
         _edge('e2', 'set', 'out', 'cond', 'in'),
@@ -305,10 +403,10 @@ void main() {
       DataStore.overrideDir(Directory.systemTemp.parent);
     });
 
-    test('滑动与长按参数解析（方向模式）', () async {
+    test('滑动参数解析（方向模式）与坐标模式', () async {
       final s = _build([
         _node('a', 'start'),
-        _node('sw', 'swipe', {
+        _mouse('sw', 'swipe', {
           'mode': 'direction',
           'startX': 100,
           'startY': 100,
@@ -316,15 +414,22 @@ void main() {
           'distance': 50,
           'durationMs': 1,
         }),
-        _node('lp', 'longPress', {'x': 5, 'y': 6, 'durationMs': 1}),
+        _mouse('sw2', 'swipe', {
+          'mode': 'coords',
+          'startX': 1,
+          'startY': 2,
+          'endX': 3,
+          'endY': 4,
+          'durationMs': 1,
+        }),
       ], [
         _edge('e1', 'a', 'out', 'sw', 'in'),
-        _edge('e2', 'sw', 'out', 'lp', 'in'),
+        _edge('e2', 'sw', 'out', 'sw2', 'in'),
       ]);
       final auto = MockAutomation();
       await _run(s, auto: auto);
       expect(auto.calls, contains('swipe(100,100->150,100)'));
-      expect(auto.calls, contains('longPress(5,6,1)'));
+      expect(auto.calls, contains('swipe(1,2->3,4)'));
     });
 
     test('强制停止：无限循环可被 stop 终止', () async {
@@ -349,25 +454,21 @@ void main() {
       expect(engine.isRunning, isFalse);
     });
 
-    test('子脚本调用（深度保护）', () async {
-      final sub = _build([
-        _node('sa', 'start'),
-        _node('sc', 'click', {'x': 7, 'y': 8, 'fingers': 1, 'button': 'left'}),
-      ], [
-        _edge('se', 'sa', 'out', 'sc', 'in'),
-      ], name: 'sub');
-      final hooks = Hooks()..subScript = sub;
-      final main = _build([
+    test('已移除的节点类型：记日志并中断执行流，不抛异常', () async {
+      final s = _build([
         _node('a', 'start'),
-        _node('sub', 'subScript', {'scriptName': 'sub'}),
+        _node('old', 'subScript', {'scriptName': 'x'}),
+        _mouse('after', 'click', {'x': 1, 'y': 1}),
       ], [
-        _edge('e1', 'a', 'out', 'sub', 'in'),
+        _edge('e1', 'a', 'out', 'old', 'in'),
+        _edge('e2', 'old', 'out', 'after', 'in'),
       ]);
       final auto = MockAutomation();
-      final engine = BlueprintInterpreter(
-          automation: auto, recognition: MockRecognition(), hooks: hooks.engineHooks);
-      await engine.run(main);
-      expect(auto.calls, contains('click(7,8,count:1,left)'));
+      final hooks = Hooks();
+      await _run(s, auto: auto, hooks: hooks);
+      expect(hooks.logs.join(), contains('节点类型已移除或未知：subScript'));
+      // 未知节点之后的操作语义不可知，必须停下而不是继续执行后续节点
+      expect(auto.calls.any((c) => c.startsWith('click')), isFalse);
     });
 
     test('执行录制节点：回放录制的动作序列', () async {
@@ -431,13 +532,16 @@ void main() {
       final auto = MockAutomation()..supported = false;
       final s = _build([
         _node('a', 'start'),
-        _node('c', 'click', {'x': 1, 'y': 1, 'fingers': 1, 'button': 'left'}),
+        _mouse('c', 'click', {'x': 1, 'y': 1, 'button': 'left'}),
       ], [
         _edge('e1', 'a', 'out', 'c', 'in'),
       ]);
       final hooks = Hooks();
       final engine = BlueprintInterpreter(
-          automation: auto, recognition: MockRecognition(), hooks: hooks.engineHooks);
+        automation: auto,
+        recognition: MockRecognition(),
+        hooks: hooks.engineHooks,
+      );
       await engine.run(s);
       expect(hooks.logs.join(), contains('平台不支持'));
     });
@@ -445,12 +549,10 @@ void main() {
 
   group('区域裁剪安全（越界不崩溃）', () {
     // 构造 w×h 纯色图：每 4 字节一个像素（BGRA）
-    RawImage img(int w, int h) =>
-        RawImage(w, h, Uint8List(w * h * 4));
+    RawImage img(int w, int h) => RawImage(w, h, Uint8List(w * h * 4));
 
     test('正常区域裁剪保持内容与尺寸', () {
-      final src = RawImage(100, 100, Uint8List.fromList(
-          List.filled(100 * 100 * 4, 7, growable: false)));
+      final src = RawImage(100, 100, Uint8List.fromList(List.filled(100 * 100 * 4, 7, growable: false)));
       final out = BlueprintInterpreter.cropImage(src, const RectPx(10, 20, 30, 40));
       expect(out.width, 30);
       expect(out.height, 40);

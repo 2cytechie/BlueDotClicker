@@ -60,6 +60,12 @@ enum ParamType {
   varName,
   templateFile,
   recording,
+
+  /// 单个虚拟键（VK 码），属性面板提供常用键下拉与全局按键拾取
+  key,
+
+  /// 有序虚拟键列表（组合键），属性面板提供逐键追加/删除
+  keyList,
 }
 
 class EnumOption {
@@ -75,6 +81,12 @@ class ParamFieldDef {
   final Object? defaultValue;
   final List<EnumOption> options;
   final String? hint;
+
+  /// 按其它参数取值决定本字段是否显示（全部命中才显示）。
+  /// 键=参数名，值=允许的取值；如 `{'action': {'swipe'}, 'mode': {'coords'}}`。
+  /// 空表表示始终显示。
+  final Map<String, Set<String>> visibleWhen;
+
   const ParamFieldDef(
     this.key,
     this.label,
@@ -82,7 +94,17 @@ class ParamFieldDef {
     this.defaultValue,
     this.options = const [],
     this.hint,
+    this.visibleWhen = const {},
   });
+
+  /// [data] 应已补齐默认值（见属性面板/节点摘要的 _effectiveData）
+  bool visibleFor(Map<String, Object?> data) {
+    for (final entry in visibleWhen.entries) {
+      final actual = data[entry.key];
+      if (actual == null || !entry.value.contains('$actual')) return false;
+    }
+    return true;
+  }
 }
 
 class NodeTypeDef {
@@ -124,6 +146,45 @@ const _regionFields = [
   ParamFieldDef('rh', '区域高', ParamType.int, defaultValue: 300),
 ];
 
+const _buttonOptions = [
+  EnumOption('left', '左键'),
+  EnumOption('right', '右键'),
+  EnumOption('middle', '中键'),
+];
+
+/// 鼠标动作（`mouse` 节点的 action 取值）
+const kMouseActions = [
+  EnumOption('click', '单击'),
+  EnumOption('doubleClick', '双击'),
+  EnumOption('swipe', '滑动'),
+  EnumOption('longPress', '长按'),
+  EnumOption('scroll', '滚轮'),
+  EnumOption('move', '移动到'),
+  EnumOption('press', '按住'),
+  EnumOption('release', '抬起'),
+];
+
+/// 键盘动作（`keyboard` 节点的 action 取值）
+const kKeyboardActions = [
+  EnumOption('tap', '按键'),
+  EnumOption('combo', '组合键'),
+  EnumOption('down', '按下'),
+  EnumOption('up', '抬起'),
+];
+
+String _labelOf(List<EnumOption> options, Object? value) {
+  for (final o in options) {
+    if (o.value == '$value') return o.label;
+  }
+  return '${value ?? ''}';
+}
+
+/// 鼠标动作中文名（未知取值原样返回）
+String mouseActionLabel(Object? action) => _labelOf(kMouseActions, action);
+
+/// 键盘动作中文名（未知取值原样返回）
+String keyboardActionLabel(Object? action) => _labelOf(kKeyboardActions, action);
+
 /// 全部节点类型定义表（编辑器 / 属性面板 / 执行引擎共用）
 final List<NodeTypeDef> kNodeTypes = [
   NodeTypeDef(
@@ -139,98 +200,205 @@ final List<NodeTypeDef> kNodeTypes = [
     ],
   ),
   NodeTypeDef(
-    type: 'click',
-    title: '点击',
-    category: NodeCategory.interaction,
-    icon: Icons.ads_click_rounded,
-    description: '在指定坐标模拟一次鼠标点击',
-    inputs: [_inExec()],
-    outputs: [_outExec()],
-    params: [
-      ParamFieldDef('x', 'X 坐标', ParamType.int, defaultValue: 100),
-      ParamFieldDef('y', 'Y 坐标', ParamType.int, defaultValue: 100),
-      ParamFieldDef(
-        'button',
-        '鼠标键',
-        ParamType.enum_,
-        defaultValue: 'left',
-        options: [
-          EnumOption('left', '左键'),
-          EnumOption('right', '右键'),
-          EnumOption('middle', '中键'),
-        ],
-      ),
-    ],
-  ),
-  NodeTypeDef(
-    type: 'doubleClick',
-    title: '双击',
+    type: 'mouse',
+    title: '鼠标操作',
     category: NodeCategory.interaction,
     icon: Icons.mouse_rounded,
-    description: '在指定坐标模拟鼠标双击（快速连击两次）',
+    description:
+        '按所选动作操作鼠标：单击/双击/滑动/长按/滚轮/移动到/按住/抬起。'
+        '「按住」不自动抬起，需搭配「抬起」或依赖脚本停止时的自动释放。',
     inputs: [_inExec()],
     outputs: [_outExec()],
     params: [
-      ParamFieldDef('x', 'X 坐标', ParamType.int, defaultValue: 100),
-      ParamFieldDef('y', 'Y 坐标', ParamType.int, defaultValue: 100),
+      ParamFieldDef(
+        'action',
+        '动作',
+        ParamType.enum_,
+        defaultValue: 'click',
+        options: kMouseActions,
+      ),
+      ParamFieldDef(
+        'x',
+        'X 坐标',
+        ParamType.int,
+        defaultValue: 100,
+        visibleWhen: const {
+          'action': {'click', 'doubleClick', 'longPress', 'scroll', 'move', 'press'},
+        },
+      ),
+      ParamFieldDef(
+        'y',
+        'Y 坐标',
+        ParamType.int,
+        defaultValue: 100,
+        visibleWhen: const {
+          'action': {'click', 'doubleClick', 'longPress', 'scroll', 'move', 'press'},
+        },
+      ),
       ParamFieldDef(
         'button',
         '鼠标键',
         ParamType.enum_,
         defaultValue: 'left',
-        options: [
-          EnumOption('left', '左键'),
-          EnumOption('right', '右键'),
-          EnumOption('middle', '中键'),
-        ],
+        options: _buttonOptions,
+        visibleWhen: const {
+          'action': {'click', 'doubleClick', 'longPress', 'press', 'release'},
+        },
       ),
-    ],
-  ),
-  NodeTypeDef(
-    type: 'swipe',
-    title: '滑动',
-    category: NodeCategory.interaction,
-    icon: Icons.swipe_rounded,
-    description: '从起点滑动到终点（坐标模式）或按方向与距离滑动（方向模式）',
-    inputs: [_inExec()],
-    outputs: [_outExec()],
-    params: [
       ParamFieldDef(
         'mode',
-        '模式',
+        '滑动模式',
         ParamType.enum_,
         defaultValue: 'coords',
         options: [
           EnumOption('coords', '起点终点'),
           EnumOption('direction', '方向距离'),
         ],
+        visibleWhen: const {
+          'action': {'swipe'},
+        },
       ),
-      ParamFieldDef('startX', '起点X', ParamType.int, defaultValue: 400),
-      ParamFieldDef('startY', '起点Y', ParamType.int, defaultValue: 300),
-      ParamFieldDef('endX', '终点X', ParamType.int, defaultValue: 600),
-      ParamFieldDef('endY', '终点Y', ParamType.int, defaultValue: 300),
+      ParamFieldDef(
+        'startX',
+        '起点X',
+        ParamType.int,
+        defaultValue: 400,
+        visibleWhen: const {
+          'action': {'swipe'},
+        },
+      ),
+      ParamFieldDef(
+        'startY',
+        '起点Y',
+        ParamType.int,
+        defaultValue: 300,
+        visibleWhen: const {
+          'action': {'swipe'},
+        },
+      ),
+      ParamFieldDef(
+        'endX',
+        '终点X',
+        ParamType.int,
+        defaultValue: 600,
+        visibleWhen: const {
+          'action': {'swipe'},
+          'mode': {'coords'},
+        },
+      ),
+      ParamFieldDef(
+        'endY',
+        '终点Y',
+        ParamType.int,
+        defaultValue: 300,
+        visibleWhen: const {
+          'action': {'swipe'},
+          'mode': {'coords'},
+        },
+      ),
       ParamFieldDef(
         'angle',
         '方向角(度,0=右,逆时针)',
         ParamType.double,
         defaultValue: 0,
+        visibleWhen: const {
+          'action': {'swipe'},
+          'mode': {'direction'},
+        },
       ),
-      ParamFieldDef('distance', '距离(px)', ParamType.int, defaultValue: 200),
-      ParamFieldDef('durationMs', '时长(ms)', ParamType.int, defaultValue: 300),
+      ParamFieldDef(
+        'distance',
+        '距离(px)',
+        ParamType.int,
+        defaultValue: 200,
+        visibleWhen: const {
+          'action': {'swipe'},
+          'mode': {'direction'},
+        },
+      ),
+      ParamFieldDef(
+        'durationMs',
+        '滑动时长(ms)',
+        ParamType.int,
+        defaultValue: 300,
+        visibleWhen: const {
+          'action': {'swipe'},
+        },
+      ),
+      ParamFieldDef(
+        'holdMs',
+        '按住时长(ms)',
+        ParamType.int,
+        defaultValue: 800,
+        visibleWhen: const {
+          'action': {'longPress'},
+        },
+      ),
+      ParamFieldDef(
+        'dx',
+        '滚轮水平(120=一格,正=右)',
+        ParamType.int,
+        defaultValue: 0,
+        visibleWhen: const {
+          'action': {'scroll'},
+        },
+      ),
+      ParamFieldDef(
+        'dy',
+        '滚轮垂直(120=一格,正=上)',
+        ParamType.int,
+        defaultValue: 120,
+        visibleWhen: const {
+          'action': {'scroll'},
+        },
+      ),
     ],
   ),
   NodeTypeDef(
-    type: 'longPress',
-    title: '长按',
+    type: 'keyboard',
+    title: '键盘操作',
     category: NodeCategory.interaction,
-    icon: Icons.pan_tool_rounded,
-    description: '在指定坐标按下鼠标并保持指定时长',
+    icon: Icons.keyboard_rounded,
+    description:
+        '按所选动作操作键盘：按键/组合键/按下/抬起。'
+        '键位可从常用键下拉选择，或点「拾取」后按下实际按键。「按下」需搭配「抬起」。',
     inputs: [_inExec()],
     outputs: [_outExec()],
     params: [
-      ParamFieldDef('x', 'X 坐标', ParamType.int, defaultValue: 100),
-      ParamFieldDef('y', 'Y 坐标', ParamType.int, defaultValue: 100),
-      ParamFieldDef('durationMs', '时长(ms)', ParamType.int, defaultValue: 800),
+      ParamFieldDef(
+        'action',
+        '动作',
+        ParamType.enum_,
+        defaultValue: 'tap',
+        options: kKeyboardActions,
+      ),
+      ParamFieldDef(
+        'vkCode',
+        '按键',
+        ParamType.key,
+        defaultValue: 0,
+        visibleWhen: const {
+          'action': {'tap', 'down', 'up'},
+        },
+      ),
+      ParamFieldDef(
+        'comboKeys',
+        '组合键(按顺序)',
+        ParamType.keyList,
+        defaultValue: const <int>[],
+        visibleWhen: const {
+          'action': {'combo'},
+        },
+      ),
+      ParamFieldDef(
+        'durationMs',
+        '按住时长(ms)',
+        ParamType.int,
+        defaultValue: 60,
+        visibleWhen: const {
+          'action': {'tap', 'combo'},
+        },
+      ),
     ],
   ),
   NodeTypeDef(
@@ -460,23 +628,27 @@ final List<NodeTypeDef> kNodeTypes = [
       ParamFieldDef('name', '关联变量名', ParamType.varName, defaultValue: 'myVar'),
     ],
   ),
-  NodeTypeDef(
-    type: 'subScript',
-    title: '子脚本',
-    category: NodeCategory.script,
-    icon: Icons.subdirectory_arrow_right_rounded,
-    description: '调用已保存的其他脚本（独立变量表，递归深度上限 8）',
-    inputs: [_inExec()],
-    outputs: [_outExec()],
-    params: [
-      ParamFieldDef('scriptName', '脚本名称', ParamType.string, defaultValue: ''),
-    ],
-  ),
 ];
 
 final Map<String, NodeTypeDef> kNodeTypesById = {
   for (final t in kNodeTypes) t.type: t,
 };
 
-NodeTypeDef nodeDef(String type) =>
-    kNodeTypesById[type] ?? kNodeTypesById['delay']!;
+/// 未知/已移除节点类型的占位定义：无端口、无参数，属性面板只给删除入口。
+/// （旧版 click/doubleClick/swipe/longPress/subScript 节点加载后会落到这里）
+const NodeTypeDef kUnknownNodeDef = NodeTypeDef(
+  type: '__unknown__',
+  title: '未知节点',
+  category: NodeCategory.logic,
+  icon: Icons.help_outline_rounded,
+  description: '该节点类型已移除或来自更新版本，无法编辑与执行；请删除后重建。',
+  inputs: [],
+  outputs: [],
+  params: [],
+);
+
+/// 是否为当前版本支持的节点类型
+bool isKnownNodeType(String type) => kNodeTypesById.containsKey(type);
+
+/// 节点类型定义；未知类型返回 [kUnknownNodeDef]（不再是静默回退到延时）
+NodeTypeDef nodeDef(String type) => kNodeTypesById[type] ?? kUnknownNodeDef;

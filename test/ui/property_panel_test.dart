@@ -11,7 +11,7 @@ void main() {
   setUp(() {
     controller = fl.NodeEditorController(definitions: blueprintNodeRegistry);
     controller.addNode(
-      blueprintNodeRegistry.instantiate('click', id: 'n1', position: Offset.zero),
+      blueprintNodeRegistry.instantiate('mouse', id: 'n1', position: Offset.zero),
     );
     controller.selection.selectNode('n1');
   });

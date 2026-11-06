@@ -5,8 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme.dart';
 import '../../models/blueprint.dart';
+import '../../models/key_names.dart';
 import '../../models/node_types.dart' show nodeDef;
 import '../../state/providers.dart';
+import 'editor_menus.dart';
 import 'node_body.dart';
 import 'node_bridge.dart';
 import 'node_palette.dart';
@@ -30,6 +32,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   bool _showLogs = false;
   // dispose 中禁止使用 ref（Riverpod 3 抛 StateError）——didChangeDependencies 捕获
   CoordinatePickNotifier? _pickNotifier;
+  KeyPickNotifier? _keyPickNotifier;
 
   @override
   void initState() {
@@ -66,6 +69,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _pickNotifier ??= ref.read(coordinatePickProvider.notifier);
+    _keyPickNotifier ??= ref.read(keyPickProvider.notifier);
   }
 
   @override
@@ -74,6 +78,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     // 页面销毁时兜底退出拾取（钩子必须卸载；用捕获引用，Riverpod 3 禁止 dispose 中用 ref，
     // 否则拾取中切走页签时钩子泄漏——全局左/右/中键被吞 + 应用窗口保持最小化）
     _pickNotifier?.cancel();
+    _keyPickNotifier?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -221,6 +226,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     children: [
       child,
       const Positioned(top: 12, left: 0, right: 0, child: _PickBanner()),
+      const Positioned(top: 12, left: 0, right: 0, child: _KeyPickBanner()),
     ],
   );
 
@@ -281,6 +287,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
                         theme: fl.NodeEditorTheme.dark(
                           accent: AppColors.peacock,
                         ).copyWith(background: AppColors.canvasBg),
+                        contextMenus: buildEditorContextMenus(),
                         onConnectionTap: _confirmDeleteConnection,
                       );
                       if (constraints.maxWidth >= 1100) {
@@ -561,6 +568,56 @@ class _PickBanner extends ConsumerWidget {
                   ' · 按键随点击记录',
                   style: TextStyle(fontSize: 12, color: AppColors.peacock),
                 ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 按键拾取悬浮条（独立订阅按键拾取状态，命中即消失）
+class _KeyPickBanner extends ConsumerWidget {
+  const _KeyPickBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pick = ref.watch(keyPickProvider);
+    if (!pick.active) return const SizedBox.shrink();
+    final pressed = pick.pressedVk;
+    return IgnorePointer(
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppColors.ink.withValues(alpha: 0.88),
+            borderRadius: BorderRadius.circular(999),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x33000000),
+                blurRadius: 8,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.keyboard_rounded,
+                size: 15,
+                color: AppColors.peacock,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${pick.target!.label} · '
+                '${pressed == null ? '请按下要绑定的按键' : '已捕获 ${keyLabel(pressed)}'}'
+                ' · Esc 取消',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.moonWhite,
+                ),
+              ),
             ],
           ),
         ),

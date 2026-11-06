@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:bluedot_clicker/models/blueprint.dart';
+import 'package:bluedot_clicker/models/node_types.dart' show isKnownNodeType;
 import 'package:bluedot_clicker/ui/editor/node_bridge.dart';
 import 'package:fl_nodes_v2/fl_nodes_v2.dart' as fl;
 import 'package:flutter_test/flutter_test.dart';
@@ -26,10 +27,10 @@ BlueprintScript _sample() {
 }
 
 void main() {
-  test('定义注册表包含全部 14 种节点类型', () {
+  test('定义注册表包含全部 12 种节点类型', () {
     expect(blueprintNodeRegistry, isNotNull);
     // 抽查几种关键类型定义可实例化（start 无参数字段，data 允许为空）
-    for (final type in ['start', 'click', 'doubleClick', 'swipe', 'longPress', 'screenshot', 'ocr', 'imageMatch', 'condition', 'loop', 'delay', 'setVar', 'storage', 'subScript']) {
+    for (final type in ['start', 'mouse', 'keyboard', 'playRecording', 'screenshot', 'ocr', 'imageMatch', 'condition', 'loop', 'delay', 'setVar', 'storage']) {
       final node = blueprintNodeRegistry.instantiate(type, id: 't_$type', position: Offset.zero);
       expect(node.type, type, reason: '类型 $type 应可实例化');
       if (type != 'start') {
@@ -38,6 +39,26 @@ void main() {
       // 端口由定义派生
       expect(node.ports, isNotEmpty, reason: '类型 $type 应有派生端口');
     }
+  });
+
+  test('已移除的节点类型不再注册，且加载时连同连线被过滤', () {
+    final s = BlueprintScript(name: 'legacy');
+    s.nodes['old'] = BPNode(id: 'old', type: 'click', x: 0, y: 0);
+    s.nodes['keep'] = BPNode(id: 'keep', type: 'delay', params: {'ms': 10});
+    s.edges['e1'] = BPEdge(
+      id: 'e1',
+      from: const PortRef(nodeId: 'old', port: 'out'),
+      to: const PortRef(nodeId: 'keep', port: 'in'),
+      kind: EdgeKind.exec,
+    );
+    expect(isKnownNodeType('click'), isFalse);
+    final graph = blueprintToGraph(s);
+    expect(graph.nodes.containsKey('old'), isTrue, reason: '节点本身保留，供用户识别后删除');
+    expect(graph.connections, isEmpty, reason: '未知类型无端口，连线必须过滤');
+    // 保存不回写已过滤的连线，节点与参数仍保留
+    final out = graphToBlueprint(graph, name: s.name);
+    expect(out.nodes.containsKey('old'), isTrue);
+    expect(out.edges, isEmpty);
   });
 
   test('BlueprintScript → Graph → BlueprintScript 往返一致', () {
@@ -129,8 +150,8 @@ void main() {
         ..connectionValidator = blueprintConnectionValidator;
       c.addNodes([
         blueprintNodeRegistry.instantiate('start', id: 'st', position: Offset.zero),
-        blueprintNodeRegistry.instantiate('click', id: 'a', position: const Offset(200, 0)),
-        blueprintNodeRegistry.instantiate('click', id: 'b', position: const Offset(200, 150)),
+        blueprintNodeRegistry.instantiate('mouse', id: 'a', position: const Offset(200, 0)),
+        blueprintNodeRegistry.instantiate('mouse', id: 'b', position: const Offset(200, 150)),
         blueprintNodeRegistry.instantiate('ocr', id: 'ocr', position: const Offset(0, 300)),
         blueprintNodeRegistry.instantiate('condition', id: 'c1', position: const Offset(300, 300)),
         blueprintNodeRegistry.instantiate('condition', id: 'c2', position: const Offset(300, 450)),

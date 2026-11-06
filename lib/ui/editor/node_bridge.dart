@@ -38,7 +38,7 @@ fl.NodePort _toFlPort(PortDef p) {
         );
 }
 
-/// 全部节点定义（14 种），由 kNodeTypes 生成
+/// 全部节点定义，由 kNodeTypes 生成
 List<fl.NodeDefinition> buildNodeDefinitions() => [
       for (final def in kNodeTypes)
         fl.NodeDefinition(
@@ -69,7 +69,10 @@ List<fl.NodeDefinition> buildNodeDefinitions() => [
 final fl.NodeDefinitionRegistry blueprintNodeRegistry =
     fl.NodeDefinitionRegistry(buildNodeDefinitions());
 
-/// BlueprintScript → 编辑器图模型
+/// BlueprintScript → 编辑器图模型。
+///
+/// 已移除/未知类型的节点会原样保留（属性面板显示为「未知节点」，参数不丢），
+/// 但它们没有端口，连同其连线一并过滤——否则会留下指向不存在端口的悬空引用。
 fl.NodeGraph blueprintToGraph(BlueprintScript script) => fl.NodeGraph(
       nodes: [
         for (final n in script.nodes.values)
@@ -83,13 +86,24 @@ fl.NodeGraph blueprintToGraph(BlueprintScript script) => fl.NodeGraph(
       ],
       connections: [
         for (final e in script.edges.values)
-          fl.NodeConnection(
-            id: e.id,
-            from: fl.PortRef(e.from.nodeId, e.from.port),
-            to: fl.PortRef(e.to.nodeId, e.to.port),
-          ),
+          if (_edgeEndpointsKnown(script, e))
+            fl.NodeConnection(
+              id: e.id,
+              from: fl.PortRef(e.from.nodeId, e.from.port),
+              to: fl.PortRef(e.to.nodeId, e.to.port),
+            ),
       ],
     );
+
+/// 连线两端都存在且都是当前版本支持的节点类型
+bool _edgeEndpointsKnown(BlueprintScript script, BPEdge e) {
+  final from = script.nodes[e.from.nodeId];
+  final to = script.nodes[e.to.nodeId];
+  return from != null &&
+      to != null &&
+      isKnownNodeType(from.type) &&
+      isKnownNodeType(to.type);
+}
 
 /// 编辑器图模型 → BlueprintScript（保存/运行前调用）。
 /// [variables] 必须透传：graph 中不承载脚本级初始变量，缺省会在保存时静默清空。
