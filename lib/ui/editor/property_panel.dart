@@ -65,9 +65,8 @@ class PropertyPanel extends ConsumerWidget {
     'mouse' => switch ('${data['action']}') {
       'click' ||
       'doubleClick' ||
-      'longPress' ||
-      'press' => [('拾取坐标', 'x', 'y', 'button')],
-      // 滚轮/移动只需要位置；抬起不需要坐标
+      'longPress' => [('拾取坐标', 'x', 'y', 'button')],
+      // 滚轮/移动只需要位置
       'scroll' || 'move' => [('拾取坐标', 'x', 'y', null)],
       'swipe' => [
         ('拾取起点', 'startX', 'startY', null),
@@ -78,131 +77,7 @@ class PropertyPanel extends ConsumerWidget {
     _ => const [],
   };
 
-  /// 屏幕坐标拾取区：点击按钮进入全局拾取（左/右/中键确认，Esc 取消）。
-  /// 点击/双击/长按/按住节点的按键类型随确认点击一并记录。
-  Widget _buildPickSection(WidgetRef ref, fl.GraphNode node) {
-    final automation = ref.watch(automationProvider);
-    if (!automation.isSupported) return const SizedBox.shrink();
-    final data = _effectiveData(node);
-    final targets = _pickTargets(node.type, data);
-    if (targets.isEmpty) return const SizedBox.shrink();
-    final action = '${data['action']}';
-    final recordsButton =
-        node.type == 'mouse' && (action == 'click' || action == 'doubleClick');
-
-    final pick = ref.watch(
-      coordinatePickProvider.select(
-        (s) => s.active && s.target?.nodeId == node.id,
-      ),
-    );
-    final pickBusy = ref.watch(coordinatePickProvider.select((s) => s.active));
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '屏幕坐标拾取${recordsButton ? '（按键类型随点击记录）' : ''}',
-            style: const TextStyle(fontSize: 12, color: AppColors.inkSecondary),
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              for (final (label, keyX, keyY, buttonKey) in targets)
-                OutlinedButton.icon(
-                  onPressed: pickBusy
-                      ? null
-                      : () => ref
-                            .read(coordinatePickProvider.notifier)
-                            .start(
-                              controller: controller,
-                              target: PickTarget(
-                                nodeId: node.id,
-                                keyX: keyX,
-                                keyY: keyY,
-                                buttonKey: buttonKey,
-                                label: label,
-                              ),
-                            ),
-                  icon: const Icon(Icons.my_location_rounded, size: 15),
-                  label: Text(pick ? '拾取中…' : label),
-                ),
-              if (pick)
-                TextButton(
-                  onPressed: () =>
-                      ref.read(coordinatePickProvider.notifier).cancel(),
-                  child: const Text('取消'),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 键盘键位拾取区（仅键盘节点）：拾取的单键写入 vkCode，组合键动作追加到
-  /// comboKeys（每按一次追加一个，顺序即按下顺序）。
-  Widget _buildKeyPickSection(WidgetRef ref, fl.GraphNode node) {
-    if (node.type != 'keyboard') return const SizedBox.shrink();
-    final automation = ref.watch(automationProvider);
-    if (!automation.isSupported) return const SizedBox.shrink();
-    final data = _effectiveData(node);
-    final isCombo = '${data['action']}' == 'combo';
-
-    final picking = ref.watch(
-      keyPickProvider.select((s) => s.active && s.target?.nodeId == node.id),
-    );
-    final busy = ref.watch(keyPickProvider.select((s) => s.active));
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            isCombo ? '键位拾取（每次追加一个键）' : '键位拾取',
-            style: const TextStyle(fontSize: 12, color: AppColors.inkSecondary),
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              OutlinedButton.icon(
-                onPressed: busy
-                    ? null
-                    : () => ref
-                          .read(keyPickProvider.notifier)
-                          .start(
-                            controller: controller,
-                            target: KeyPickTarget(
-                              nodeId: node.id,
-                              paramKey: isCombo ? 'comboKeys' : 'vkCode',
-                              append: isCombo,
-                              label: isCombo ? '拾取组合键' : '拾取按键',
-                            ),
-                          ),
-                icon: const Icon(Icons.keyboard_rounded, size: 15),
-                label: Text(picking ? '拾取中…' : (isCombo ? '拾取组合键' : '拾取按键')),
-              ),
-              if (picking)
-                TextButton(
-                  onPressed: () => ref.read(keyPickProvider.notifier).cancel(),
-                  child: const Text('取消'),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 左右并排渲染的坐标参数对（其余字段维持上下排列）
+  /// 左右并排渲染的参数对（其余字段维持上下排列）
   static const List<(String, String)> _kCoordPairs = [
     ('x', 'y'),
     ('startX', 'startY'),
@@ -211,15 +86,38 @@ class PropertyPanel extends ConsumerWidget {
     // 媒体节点区域参数：区域X/区域Y 一行，区域宽/区域高 一行
     ('rx', 'ry'),
     ('rw', 'rh'),
+    // 条件判断：左值/右值各自的 变量名+常量 一行
+    ('leftVar', 'leftConst'),
+    ('rightVar', 'rightConst'),
+    // 数据存取：存储键+变量名；设置变量：变量名+常量
+    ('key', 'name'),
+    ('name', 'const'),
+    // 图像识别：命中X/命中Y 存入变量
+    ('posXVar', 'posYVar'),
   ];
 
   /// 参数列表：先按节点当前取值过滤掉不适用的字段（如非滑动动作不显示起终点），
-  /// 再让坐标对左右并排（各占一半宽），其余字段一字段一行。
+  /// 再让参数对左右并排（各占一半宽），坐标行命中拾取目标的行尾渲染内联拾取按钮、
+  /// 媒体节点的区域X/Y 行尾渲染框选按钮，其余字段一字段一行。
   List<Widget> _buildParamFields(WidgetRef ref, fl.GraphNode node) {
     final data = _effectiveData(node);
-    final params = nodeDef(
-      node.type,
-    ).params.where((f) => f.visibleFor(data)).toList();
+    final def = nodeDef(node.type);
+    final params = def.params.where((f) => f.visibleFor(data)).toList();
+    // 拾取目标按 keyX 索引：'x'/'startX'/'endX' 分别对应一行坐标对
+    final pickByKeyX = {
+      for (final (label, keyX, keyY, buttonKey)
+          in _pickTargets(node.type, data))
+        keyX: PickTarget(
+          nodeId: node.id,
+          keyX: keyX,
+          keyY: keyY,
+          buttonKey: buttonKey,
+          label: label,
+        ),
+    };
+    // 媒体节点区域可通过屏幕框选获取：区域X/Y 行尾放框选按钮
+    final regionPickable =
+        def.category == NodeCategory.media && data['useRegion'] != null;
     final children = <Widget>[];
     var i = 0;
     while (i < params.length) {
@@ -227,6 +125,8 @@ class PropertyPanel extends ConsumerWidget {
       final next = i + 1 < params.length ? params[i + 1] : null;
       if (next != null &&
           _kCoordPairs.any((p) => p.$1 == f.key && p.$2 == next.key)) {
+        final pickTarget = pickByKeyX[f.key];
+        final regionButton = regionPickable && f.key == 'rx';
         children.add(
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -234,6 +134,17 @@ class PropertyPanel extends ConsumerWidget {
               Expanded(child: _buildField(ref, node, f)),
               const SizedBox(width: 10),
               Expanded(child: _buildField(ref, node, next)),
+              if (pickTarget != null) ...[
+                const SizedBox(width: 6),
+                _InlinePickButton(
+                  controller: controller,
+                  node: node,
+                  target: pickTarget,
+                ),
+              ] else if (regionButton) ...[
+                const SizedBox(width: 6),
+                _InlineRegionPickButton(controller: controller, node: node),
+              ],
             ],
           ),
         );
@@ -254,12 +165,13 @@ class PropertyPanel extends ConsumerWidget {
     return _MediaTestSection(node: node);
   }
 
-  /// 输入端口说明区：解释左侧输入端口的含义（仅填写了说明的端口，即媒体节点）
-  Widget _buildInputDocSection(fl.GraphNode node) {
-    final inputs = nodeDef(
-      node.type,
-    ).inputs.where((p) => p.note != null).toList();
-    if (inputs.isEmpty) return const SizedBox.shrink();
+  /// 端口说明区：分「输入」「输出」两组列出填写了说明的数据端口，
+  /// 让用户快速了解节点各数据端口接什么、产出什么（执行流口不写说明）。
+  Widget _buildPortDocSection(fl.GraphNode node) {
+    final def = nodeDef(node.type);
+    final inputs = def.inputs.where((p) => p.note != null).toList();
+    final outputs = def.outputs.where((p) => p.note != null).toList();
+    if (inputs.isEmpty && outputs.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: 2, bottom: 14),
       child: Container(
@@ -274,27 +186,43 @@ class PropertyPanel extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              '输入端口说明',
+              '端口说明',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w400,
                 color: AppColors.ink,
               ),
             ),
-            const SizedBox(height: 8),
-            for (final p in inputs) ...[
-              _PortDocHeader(port: p),
-              const SizedBox(height: 4),
-              Text(
-                p.note!,
-                style: const TextStyle(
-                  fontSize: 16,
-                  height: 1.5,
-                  color: AppColors.inkSecondary,
+            for (final (title, ports) in [
+              ('输入', inputs),
+              ('输出', outputs),
+            ])
+              if (ports.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w400,
+                      color: AppColors.inkSecondary,
+                    ),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
-            ],
+                for (final p in ports) ...[
+                  _PortDocHeader(port: p),
+                  const SizedBox(height: 4),
+                  Text(
+                    p.note!,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      height: 1.5,
+                      color: AppColors.inkSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+              ],
           ],
         ),
       ),
@@ -352,6 +280,8 @@ class PropertyPanel extends ConsumerWidget {
             initialValue: f.options.any((o) => o.value == current)
                 ? current
                 : null,
+            dropdownColor: AppColors.moonWhite,
+            borderRadius: kDropdownMenuRadius,
             decoration: InputDecoration(labelText: f.label),
             items: [
               for (final o in f.options)
@@ -367,9 +297,19 @@ class PropertyPanel extends ConsumerWidget {
       case ParamType.recording:
         return _RecordingField(node: node, field: f, onCommit: onCommit);
       case ParamType.key:
-        return _KeyField(node: node, field: f, onCommit: onCommit);
+        return _KeyField(
+          controller: controller,
+          node: node,
+          field: f,
+          onCommit: onCommit,
+        );
       case ParamType.keyList:
-        return _KeyListField(node: node, field: f, onCommit: onCommit);
+        return _KeyListField(
+          controller: controller,
+          node: node,
+          field: f,
+          onCommit: onCommit,
+        );
     }
   }
 
@@ -468,10 +408,8 @@ class PropertyPanel extends ConsumerWidget {
                 children: known
                     ? [
                         _buildTestSection(node),
-                        _buildPickSection(ref, node),
-                        _buildKeyPickSection(ref, node),
                         ..._buildParamFields(ref, node),
-                        _buildInputDocSection(node),
+                        _buildPortDocSection(node),
                         const SizedBox(height: 12),
                         Text(
                           def.description,
@@ -592,6 +530,140 @@ class PropertyPanel extends ConsumerWidget {
 }
 
 enum _NumberMode { none, int, double }
+
+/// 坐标行尾的内联拾取按钮：点击进入全局拾取（左/右/中键确认，Esc 取消）。
+/// 单击/双击/长按时点击哪个鼠标键，「鼠标键」参数随确认点击一并记录。
+class _InlinePickButton extends ConsumerWidget {
+  const _InlinePickButton({
+    required this.controller,
+    required this.node,
+    required this.target,
+  });
+
+  final fl.NodeEditorController controller;
+  final fl.GraphNode node;
+  final PickTarget target;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final active = ref.watch(
+      coordinatePickProvider.select(
+        (s) =>
+            s.active &&
+            s.target?.nodeId == node.id &&
+            s.target?.keyX == target.keyX,
+      ),
+    );
+    final busy = ref.watch(coordinatePickProvider.select((s) => s.active));
+    // 紧凑按钮（40px）+ 与输入框中心对齐：输入框高约 56px，(56-40)/2 = 8
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: IconButton(
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        tooltip: active ? '拾取中（Esc 取消）' : target.label,
+        onPressed: busy
+            ? null
+            : () => ref.read(coordinatePickProvider.notifier).start(
+                  controller: controller,
+                  target: target,
+                ),
+        icon: Icon(
+          Icons.my_location_rounded,
+          size: 20,
+          color: active ? AppColors.peacock : AppColors.inkSecondary,
+        ),
+      ),
+    );
+  }
+}
+
+/// 媒体节点区域X/Y 行尾的内联框选按钮：点击进入屏幕框选（左键拖出矩形、
+/// 绿色描边实时预览、松开确认、Esc 取消），确认后回填 rx/ry/rw/rh
+/// 并自动勾选「仅指定区域」。
+class _InlineRegionPickButton extends ConsumerWidget {
+  const _InlineRegionPickButton({required this.controller, required this.node});
+
+  final fl.NodeEditorController controller;
+  final fl.GraphNode node;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final active = ref.watch(
+      regionPickProvider.select((s) => s.active && s.target?.nodeId == node.id),
+    );
+    final busy = ref.watch(regionPickProvider.select((s) => s.active));
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: IconButton(
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        tooltip: active ? '框选中（Esc 取消）' : '框选区域',
+        onPressed: busy
+            ? null
+            : () => ref.read(regionPickProvider.notifier).start(
+                  controller: controller,
+                  target: RegionPickTarget(
+                    nodeId: node.id,
+                    keyX: 'rx',
+                    keyY: 'ry',
+                    keyW: 'rw',
+                    keyH: 'rh',
+                    label: '框选区域',
+                  ),
+                ),
+        icon: Icon(
+          Icons.crop_free_rounded,
+          size: 20,
+          color: active ? AppColors.success : AppColors.inkSecondary,
+        ),
+      ),
+    );
+  }
+}
+
+/// 键位拾取按钮（键盘节点）：单键动作写入 vkCode，组合键动作追加到
+/// comboKeys（每按一次追加一个，顺序即按下顺序）。
+class _InlineKeyPickButton extends ConsumerWidget {
+  const _InlineKeyPickButton({
+    required this.controller,
+    required this.node,
+    required this.target,
+  });
+
+  final fl.NodeEditorController controller;
+  final fl.GraphNode node;
+  final KeyPickTarget target;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final active = ref.watch(
+      keyPickProvider.select(
+        (s) => s.active && s.target?.nodeId == node.id,
+      ),
+    );
+    final busy = ref.watch(keyPickProvider.select((s) => s.active));
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: IconButton(
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        tooltip: active ? '拾取中（Esc 取消）' : target.label,
+        onPressed: busy
+            ? null
+            : () => ref.read(keyPickProvider.notifier).start(
+                  controller: controller,
+                  target: target,
+                ),
+        icon: Icon(
+          Icons.keyboard_rounded,
+          size: 20,
+          color: active ? AppColors.peacock : AppColors.inkSecondary,
+        ),
+      ),
+    );
+  }
+}
 
 /// 文本参数字段：持有本地 controller，避免每次全局刷新导致光标跳动。
 /// 焦点期间开启撤销事务：整段输入折叠为一条撤销记录（否则每键一条，
@@ -767,6 +839,8 @@ class _RecordingField extends ConsumerWidget {
             children: [
               DropdownButtonFormField<String>(
                 initialValue: exists ? current : null,
+                dropdownColor: AppColors.moonWhite,
+                borderRadius: kDropdownMenuRadius,
                 decoration: InputDecoration(
                   labelText: field.label,
                   hintText: items.isEmpty ? '暂无录制，请先到「录制与回放」页录制' : null,
@@ -798,15 +872,16 @@ class _RecordingField extends ConsumerWidget {
   }
 }
 
-/// 单键字段：常用键下拉（拾取到的特殊键会临时补进选项）。
-/// 「拾取按键」按钮在节点上方的键位拾取区。
-class _KeyField extends StatelessWidget {
+/// 单键字段：常用键下拉（拾取到的特殊键会临时补进选项）+ 行尾内联拾取按钮。
+class _KeyField extends ConsumerWidget {
   const _KeyField({
+    required this.controller,
     required this.node,
     required this.field,
     required this.onCommit,
   });
 
+  final fl.NodeEditorController controller;
   final fl.GraphNode node;
   final ParamFieldDef field;
   final void Function(Object value) onCommit;
@@ -818,7 +893,10 @@ class _KeyField extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final supported = ref.watch(
+      automationProvider.select((a) => a.isSupported),
+    );
     final vk = _current;
     final options = List.of(kCommonKeys);
     if (vk > 0 && !options.any((o) => o.$1 == vk)) {
@@ -826,40 +904,66 @@ class _KeyField extends StatelessWidget {
     }
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: DropdownButtonFormField<int>(
-        key: ValueKey('${node.id}-${field.key}-$vk'),
-        initialValue: vk > 0 ? vk : null,
-        isExpanded: true,
-        decoration: InputDecoration(
-          labelText: field.label,
-          hintText: '未设置（点上方「拾取按键」）',
-        ),
-        items: [
-          for (final (code, _) in options)
-            DropdownMenuItem(value: code, child: Text(keyLabel(code))),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: DropdownButtonFormField<int>(
+              key: ValueKey('${node.id}-${field.key}-$vk'),
+              initialValue: vk > 0 ? vk : null,
+              dropdownColor: AppColors.moonWhite,
+              borderRadius: kDropdownMenuRadius,
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: field.label,
+                hintText: '未设置（点右侧按钮拾取）',
+              ),
+              items: [
+                for (final (code, _) in options)
+                  DropdownMenuItem(value: code, child: Text(keyLabel(code))),
+              ],
+              onChanged: (v) {
+                if (v != null) onCommit(v);
+              },
+            ),
+          ),
+          if (supported) ...[
+            const SizedBox(width: 6),
+            _InlineKeyPickButton(
+              controller: controller,
+              node: node,
+              target: KeyPickTarget(
+                nodeId: node.id,
+                paramKey: field.key,
+                label: '拾取按键',
+              ),
+            ),
+          ],
         ],
-        onChanged: (v) {
-          if (v != null) onCommit(v);
-        },
       ),
     );
   }
 }
 
-/// 组合键字段：有序 chips（可删）+ 追加下拉。顺序即按下顺序。
-class _KeyListField extends StatelessWidget {
+/// 组合键字段：标题行尾内联拾取按钮 + 有序 chips（可删）+ 追加下拉。顺序即按下顺序。
+class _KeyListField extends ConsumerWidget {
   const _KeyListField({
+    required this.controller,
     required this.node,
     required this.field,
     required this.onCommit,
   });
 
+  final fl.NodeEditorController controller;
   final fl.GraphNode node;
   final ParamFieldDef field;
   final void Function(Object value) onCommit;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final supported = ref.watch(
+      automationProvider.select((a) => a.isSupported),
+    );
     final keys = parseKeyList(node.data[field.key]);
     final addable = kCommonKeys
         .where((o) => !keys.contains(o.$1))
@@ -869,14 +973,34 @@ class _KeyListField extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            field.label,
-            style: const TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  field.label,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.inkSecondary,
+                  ),
+                ),
+              ),
+              if (supported)
+                _InlineKeyPickButton(
+                  controller: controller,
+                  node: node,
+                  target: KeyPickTarget(
+                    nodeId: node.id,
+                    paramKey: field.key,
+                    append: true,
+                    label: '拾取组合键',
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 6),
           if (keys.isEmpty)
             const Text(
-              '尚未添加按键（可用上方「拾取组合键」或下方下拉逐个添加）',
+              '尚未添加按键（可用右侧拾取按钮或下方下拉逐个添加）',
               style: TextStyle(fontSize: 12, color: AppColors.inkSecondary),
             )
           else
@@ -898,6 +1022,8 @@ class _KeyListField extends StatelessWidget {
           DropdownButtonFormField<int>(
             key: ValueKey('${node.id}-${field.key}-add-${keys.length}'),
             initialValue: null,
+            dropdownColor: AppColors.moonWhite,
+            borderRadius: kDropdownMenuRadius,
             isExpanded: true,
             decoration: const InputDecoration(
               labelText: '添加按键',
@@ -996,7 +1122,7 @@ class _TemplateFileField extends StatelessWidget {
   }
 }
 
-/// 输入端口说明的单行抬头：类型徽标（执行流/数据）+ 端口名称
+/// 端口说明的单行抬头：类型/方向徽标（数据·输入 / 数据·输出）+ 端口名称
 class _PortDocHeader extends StatelessWidget {
   const _PortDocHeader({required this.port});
 
@@ -1004,8 +1130,11 @@ class _PortDocHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final exec = port.kind == PortKind.exec;
-    final color = exec ? AppColors.execWire : AppColors.dataWire;
+    final color = port.kind == PortKind.exec
+        ? AppColors.execWire
+        : AppColors.dataWire;
+    final badge = '${port.kind == PortKind.exec ? '执行流' : '数据'}'
+        '·${port.dir == PortDir.input ? '输入' : '输出'}';
     return Row(
       children: [
         Container(
@@ -1016,7 +1145,7 @@ class _PortDocHeader extends StatelessWidget {
             border: Border.all(color: color),
           ),
           child: Text(
-            exec ? '执行流' : '数据',
+            badge,
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w400,
@@ -1027,7 +1156,9 @@ class _PortDocHeader extends StatelessWidget {
         const SizedBox(width: 6),
         Expanded(
           child: Text(
-            port.label.isEmpty ? (exec ? '进入' : port.key) : port.label,
+            port.label.isEmpty
+                ? (port.dir == PortDir.input ? '进入' : '执行出口')
+                : port.label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(

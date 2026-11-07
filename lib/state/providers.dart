@@ -11,6 +11,7 @@ import '../platform/coordinate_picker.dart';
 import '../platform/key_picker.dart';
 import '../platform/platform_automation.dart';
 import '../platform/recording.dart';
+import '../platform/region_picker.dart';
 import '../services/media_tester.dart';
 import '../services/recognition.dart';
 import '../services/script_storage.dart';
@@ -235,6 +236,93 @@ final coordinatePickerProvider = Provider<CoordinatePicker>((ref) => CoordinateP
 final coordinatePickProvider =
     NotifierProvider<CoordinatePickNotifier, CoordinatePickState>(
       CoordinatePickNotifier.new,
+    );
+
+// ---- 全局区域框选 ----
+
+/// 一次区域框选目标：确认后把矩形写回哪个节点的哪些区域参数
+class RegionPickTarget {
+  final String nodeId;
+
+  /// 区域参数键（'rx'/'ry'/'rw'/'rh'）
+  final String keyX, keyY, keyW, keyH;
+
+  /// 悬浮提示标签（「框选区域」）
+  final String label;
+  const RegionPickTarget({
+    required this.nodeId,
+    required this.keyX,
+    required this.keyY,
+    required this.keyW,
+    required this.keyH,
+    required this.label,
+  });
+}
+
+/// 框选进行中的状态
+class RegionPickState {
+  final RegionPickTarget? target; // null = 空闲
+  const RegionPickState({this.target});
+
+  bool get active => target != null;
+}
+
+class RegionPickNotifier extends Notifier<RegionPickState> {
+  /// provider 被销毁后（离开编辑器页）异步恢复的代码不得再写 state
+  bool _alive = true;
+
+  @override
+  RegionPickState build() {
+    _alive = true;
+    ref.onDispose(() => _alive = false);
+    return const RegionPickState();
+  }
+
+  RegionPicker get _picker => ref.read(regionPickerProvider);
+
+  void _set(RegionPickState s) {
+    if (_alive) state = s;
+  }
+
+  /// 开始框选；确认后矩形经 [controller] 写回节点（rx/ry/rw/rh），
+  /// 并自动勾选「仅指定区域」（useRegion=true），支持撤销/重做。
+  Future<void> start({
+    required fl.NodeEditorController controller,
+    required RegionPickTarget target,
+  }) async {
+    if (state.active) return;
+    if (!ref.read(automationProvider).isSupported) return;
+    _set(RegionPickState(target: target));
+    final result = await _picker.pickRegion();
+    // 框选期间节点可能已被删除/切换
+    if (result != null && controller.graph.nodes.containsKey(target.nodeId)) {
+      controller.updateNode(
+        target.nodeId,
+        (n) => n.withData({
+          target.keyX: result.x,
+          target.keyY: result.y,
+          target.keyW: result.w,
+          target.keyH: result.h,
+          'useRegion': true,
+        }),
+      );
+    }
+    _set(const RegionPickState());
+  }
+
+  /// UI 主动取消（页面卸载兜底；provider 已销毁时为 no-op）
+  void cancel() {
+    if (!_alive) return;
+    _picker.cancel();
+    _set(const RegionPickState());
+  }
+}
+
+final regionPickerProvider = Provider<RegionPicker>((ref) => RegionPicker());
+
+final regionPickProvider =
+    NotifierProvider<RegionPickNotifier, RegionPickState>(
+      RegionPickNotifier.new,
     );
 
 // ---- 全局按键拾取 ----

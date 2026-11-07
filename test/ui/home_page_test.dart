@@ -98,7 +98,14 @@ void main() {
       await storage.save(b);
       await pumpHome(tester);
 
-      await tester.tap(find.byTooltip('重命名').first);
+      // 列表按 updatedAt 降序（Beta 后创建排在前），不能用 .first 猜行：
+      // 那会点到 Beta 行（同名重命名不触发拦截）。显式定位 Alpha 行的重命名按钮。
+      final alphaRow = find
+          .ancestor(of: find.text('Alpha'), matching: find.byType(Row))
+          .first;
+      await tester.tap(
+        find.descendant(of: alphaRow, matching: find.byTooltip('重命名')),
+      );
       await tester.pumpAndSettle();
       await inputName(tester, 'Beta');
 

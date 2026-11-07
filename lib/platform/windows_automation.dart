@@ -35,16 +35,6 @@ class WindowsAutomation implements PlatformAutomation {
   }
 
   @override
-  Future<void> press(int x, int y, {MouseButton button = MouseButton.left}) async {
-    u32.moveAbsolute(x, y);
-    u32.mouseDown(right: button == MouseButton.right, middle: button == MouseButton.middle);
-  }
-
-  @override
-  Future<void> release({MouseButton button = MouseButton.left}) async =>
-      u32.mouseUp(right: button == MouseButton.right, middle: button == MouseButton.middle);
-
-  @override
   Future<void> swipe(int x1, int y1, int x2, int y2, {int durationMs = 300}) async {
     final steps = (durationMs / 12).clamp(4, 120).toInt();
     final dt = durationMs / steps;

@@ -32,10 +32,6 @@ class FakeAutomation implements PlatformAutomation {
   @override
   Future<void> click(int x, int y, {MouseButton button = MouseButton.left, int count = 1}) async {}
   @override
-  Future<void> press(int x, int y, {MouseButton button = MouseButton.left}) async {}
-  @override
-  Future<void> release({MouseButton button = MouseButton.left}) async {}
-  @override
   Future<void> swipe(int x1, int y1, int x2, int y2, {int durationMs = 300}) async {}
   @override
   Future<void> longPress(int x, int y, {int durationMs = 800, MouseButton button = MouseButton.left}) async {}
@@ -118,8 +114,8 @@ void main() {
       expect(r.title, '命中');
       expect(r.lines.join(), contains('0.93'));
       expect(r.lines.join(), contains('命中中心 (20, 30)'));
-      // 命中框 = 匹配坐标 + 模板尺寸（40×30）
-      expect(r.marker, (20, 30, 40, 30));
+      // MatchResult 是中心坐标，预览框应转换为左上角：中心 - 半模板尺寸
+      expect(r.marker, (0, 15, 40, 30));
       expect(auto.lastRegion, isNull);
     });
 

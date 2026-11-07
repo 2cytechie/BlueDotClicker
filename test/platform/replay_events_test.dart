@@ -23,11 +23,6 @@ class _KeyLogAutomation implements PlatformAutomation {
     calls.add('click($x,$y)');
   }
   @override
-  Future<void> press(int x, int y,
-      {MouseButton button = MouseButton.left}) async {}
-  @override
-  Future<void> release({MouseButton button = MouseButton.left}) async {}
-  @override
   Future<void> swipe(int x1, int y1, int x2, int y2, {int durationMs = 300}) async {}
   @override
   Future<void> longPress(int x, int y,

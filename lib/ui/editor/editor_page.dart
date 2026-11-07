@@ -33,6 +33,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   // dispose 中禁止使用 ref（Riverpod 3 抛 StateError）——didChangeDependencies 捕获
   CoordinatePickNotifier? _pickNotifier;
   KeyPickNotifier? _keyPickNotifier;
+  RegionPickNotifier? _regionPickNotifier;
 
   @override
   void initState() {
@@ -70,6 +71,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     super.didChangeDependencies();
     _pickNotifier ??= ref.read(coordinatePickProvider.notifier);
     _keyPickNotifier ??= ref.read(keyPickProvider.notifier);
+    _regionPickNotifier ??= ref.read(regionPickProvider.notifier);
   }
 
   @override
@@ -79,6 +81,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     // 否则拾取中切走页签时钩子泄漏——全局左/右/中键被吞 + 应用窗口保持最小化）
     _pickNotifier?.cancel();
     _keyPickNotifier?.cancel();
+    _regionPickNotifier?.cancel();
     _controller.dispose();
     super.dispose();
   }

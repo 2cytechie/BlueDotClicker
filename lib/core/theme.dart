@@ -27,6 +27,12 @@ abstract final class AppColors {
   static const dataWire = nodeData;
 }
 
+/// 下拉弹出层统一圆角。
+/// 注意：`ThemeData.dropdownMenuTheme` 只作用于 `DropdownMenu` 组件；
+/// `DropdownButtonFormField`（内部是 `DropdownButton`）的弹出层不读取该主题，
+/// 颜色/圆角必须在每处控件上显式传入（dropdownColor / borderRadius）。
+const BorderRadius kDropdownMenuRadius = BorderRadius.all(Radius.circular(12));
+
 ThemeData buildAppTheme() {
   final base = ThemeData(
     useMaterial3: true,
@@ -54,6 +60,10 @@ ThemeData buildAppTheme() {
     scaffoldBackgroundColor: AppColors.ivory,
   );
   return base.copyWith(
+    // 下拉菜单与按钮等宽对齐：非对齐模式下 SDK 会让菜单矩形左右各扩
+    // 16/24px（_kUnalignedMenuMargin），导致菜单比按钮宽且左缘错位；
+    // alignedDropdown = true 时菜单宽度=按钮宽度并与左缘对齐。
+    buttonTheme: const ButtonThemeData(alignedDropdown: true),
     appBarTheme: const AppBarTheme(
       backgroundColor: AppColors.ivory,
       foregroundColor: AppColors.ink,

@@ -140,7 +140,10 @@ class MediaTester {
         '来源图像 ${img.width} × ${img.height}',
       ],
       preview: img,
-      marker: r.found ? (r.x, r.y, tpl.width, tpl.height) : null,
+      // MatchResult 是模板中心；预览框使用左上角，需减半个模板尺寸
+      marker: r.found
+          ? (r.x - tpl.width ~/ 2, r.y - tpl.height ~/ 2, tpl.width, tpl.height)
+          : null,
     );
   }
 

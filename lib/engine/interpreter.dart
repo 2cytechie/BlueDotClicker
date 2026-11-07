@@ -57,8 +57,7 @@ class BlueprintInterpreter {
   /// 循环节点剩余计数（-1 = 无限）
   final Map<String, int> _loopRemaining = {};
 
-  /// 「按住/按下」后尚未抬起的输入：停止或结束时统一释放，避免卡住用户桌面
-  final Set<MouseButton> _pressedButtons = {};
+  /// 组合键执行中尚未抬起的按键：停止或异常结束时统一释放，避免卡住用户桌面
   final Set<int> _pressedKeys = {};
 
   bool get isRunning => _running;
@@ -73,7 +72,6 @@ class BlueprintInterpreter {
     _lastImage = null;
     _portValues.clear();
     _loopRemaining.clear();
-    _pressedButtons.clear();
     _pressedKeys.clear();
     try {
       final start = script.findStart();
@@ -345,14 +343,6 @@ class BlueprintInterpreter {
       case 'move':
         await automation.moveMouse(x, y);
         hooks.log('移动鼠标 ($x, $y)');
-      case 'press':
-        await automation.press(x, y, button: button);
-        _pressedButtons.add(button);
-        hooks.log('按住 ($x, $y) ${_buttonName(button)}（需后续「抬起」）');
-      case 'release':
-        await automation.release(button: button);
-        _pressedButtons.remove(button);
-        hooks.log('抬起 ${_buttonName(button)}');
       default:
         hooks.log('鼠标操作失败：未知动作 "$action"');
     }
@@ -371,28 +361,6 @@ class BlueprintInterpreter {
           }
           await automation.keyTap(vk, durationMs: duration, extended: isExtendedKey(vk));
           hooks.log('按键 ${keyLabel(vk)}');
-        }
-      case 'down':
-        {
-          final vk = _vkCode(n);
-          if (vk == 0) {
-            hooks.log('键盘操作失败：未设置按键');
-            break;
-          }
-          await automation.keyDown(vk, extended: isExtendedKey(vk));
-          _pressedKeys.add(vk);
-          hooks.log('按下 ${keyLabel(vk)}（需后续「抬起」）');
-        }
-      case 'up':
-        {
-          final vk = _vkCode(n);
-          if (vk == 0) {
-            hooks.log('键盘操作失败：未设置按键');
-            break;
-          }
-          await automation.keyUp(vk, extended: isExtendedKey(vk));
-          _pressedKeys.remove(vk);
-          hooks.log('抬起 ${keyLabel(vk)}');
         }
       case 'combo':
         {
@@ -420,7 +388,7 @@ class BlueprintInterpreter {
     }
   }
 
-  /// 释放脚本遗留的按下状态（停止/异常/结束都走这里）
+  /// 释放脚本遗留的按下状态（停止/异常/结束都走这里；组合键执行中断兜底）
   Future<void> _releaseHeldInputs() async {
     if (_pressedKeys.isNotEmpty) {
       for (final vk in _pressedKeys.toList()) {
@@ -430,15 +398,6 @@ class BlueprintInterpreter {
       }
       _pressedKeys.clear();
       hooks.log('已释放未抬起的按键');
-    }
-    if (_pressedButtons.isNotEmpty) {
-      for (final button in _pressedButtons.toList()) {
-        try {
-          await automation.release(button: button);
-        } catch (_) {}
-      }
-      _pressedButtons.clear();
-      hooks.log('已释放未抬起的鼠标键');
     }
   }
 

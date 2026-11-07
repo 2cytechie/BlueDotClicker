@@ -61,6 +61,37 @@ void main() {
     expect(out.edges, isEmpty);
   });
 
+  test('端口级过滤：指向已删端口（screenshot 的 image 输入）的旧连线被丢弃', () {
+    final s = BlueprintScript(name: 'legacy-port');
+    s.nodes['sh'] = BPNode(id: 'sh', type: 'screenshot');
+    s.nodes['o'] = BPNode(id: 'o', type: 'ocr', params: {'resultVar': 't'});
+    // 旧脚本可能存在指向 screenshot.image 输入端口的连线（该端口已被移除）
+    s.edges['e1'] = BPEdge(
+      id: 'e1',
+      from: const PortRef(nodeId: 'sh', port: 'imageOut'),
+      to: const PortRef(nodeId: 'sh', port: 'image'),
+      kind: EdgeKind.data,
+    );
+    // 正常端口（截图图像 → OCR 图像输入）不受影响
+    s.edges['e2'] = BPEdge(
+      id: 'e2',
+      from: const PortRef(nodeId: 'sh', port: 'imageOut'),
+      to: const PortRef(nodeId: 'o', port: 'image'),
+      kind: EdgeKind.data,
+    );
+    final graph = blueprintToGraph(s);
+    expect(
+      graph.connections.values.any((c) => c.to.portId == 'image' && c.to.nodeId == 'sh'),
+      isFalse,
+      reason: 'screenshot 已无 image 输入端口，指向它的连线必须过滤',
+    );
+    expect(
+      graph.connections.values.any((c) => c.id == 'e2'),
+      isTrue,
+      reason: '端口仍然存在的连线不受影响',
+    );
+  });
+
   test('BlueprintScript → Graph → BlueprintScript 往返一致', () {
     final original = _sample();
     final graph = blueprintToGraph(original);

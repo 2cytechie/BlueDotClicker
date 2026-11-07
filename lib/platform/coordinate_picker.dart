@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ffi';
 
 import 'platform_automation.dart';
+import 'screen_marker.dart';
 import 'win32/user32.dart' as u32;
 
 /// 一次拾取的结果：屏幕物理坐标 + 确认所用的鼠标键
@@ -26,6 +27,9 @@ class CoordinatePicker {
 
   /// 最近一次已上报的光标位置（无变化时不刷新 UI，降低开销）
   (int, int)? _lastCursor;
+
+  /// 拾取期间的绿色边缘提示（虚拟桌面范围）
+  final ScreenBorderService _border = ScreenBorderService();
 
   bool get isPicking => _completer != null;
 
@@ -78,6 +82,10 @@ class CoordinatePicker {
     final hwnd = u32.ownForegroundWindow();
     if (hwnd != 0) u32.minimizeWindow(hwnd);
 
+    // 屏幕边缘绿色描边：提示可拾取的虚拟桌面范围
+    final (vx, vy, vw, vh) = u32.virtualScreenRect();
+    _border.showRect(vx, vy, vw, vh);
+
     // 轮询：实时坐标（仅变化时上报）+ Esc 取消（钩子回调不做重活）
     var escWasDown = false;
     _timer = Timer.periodic(const Duration(milliseconds: 30), (_) {
@@ -96,6 +104,7 @@ class CoordinatePicker {
       return await completer.future;
     } finally {
       _teardown();
+      _border.hide();
       if (hwnd != 0) u32.restoreWindow(hwnd);
     }
   }

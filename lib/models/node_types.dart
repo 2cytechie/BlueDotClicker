@@ -135,8 +135,8 @@ PortDef _outExec([String key = 'out', String label = '']) =>
     PortDef(key, PortKind.exec, PortDir.output, label);
 PortDef _inData(String key, String label, {String? note}) =>
     PortDef(key, PortKind.data, PortDir.input, label, note: note);
-PortDef _outData(String key, String label) =>
-    PortDef(key, PortKind.data, PortDir.output, label);
+PortDef _outData(String key, String label, {String? note}) =>
+    PortDef(key, PortKind.data, PortDir.output, label, note: note);
 
 const _regionFields = [
   ParamFieldDef('useRegion', '仅指定区域', ParamType.bool, defaultValue: false),
@@ -160,16 +160,12 @@ const kMouseActions = [
   EnumOption('longPress', '长按'),
   EnumOption('scroll', '滚轮'),
   EnumOption('move', '移动到'),
-  EnumOption('press', '按住'),
-  EnumOption('release', '抬起'),
 ];
 
 /// 键盘动作（`keyboard` 节点的 action 取值）
 const kKeyboardActions = [
   EnumOption('tap', '按键'),
   EnumOption('combo', '组合键'),
-  EnumOption('down', '按下'),
-  EnumOption('up', '抬起'),
 ];
 
 String _labelOf(List<EnumOption> options, Object? value) {
@@ -204,9 +200,7 @@ final List<NodeTypeDef> kNodeTypes = [
     title: '鼠标操作',
     category: NodeCategory.interaction,
     icon: Icons.mouse_rounded,
-    description:
-        '按所选动作操作鼠标：单击/双击/滑动/长按/滚轮/移动到/按住/抬起。'
-        '「按住」不自动抬起，需搭配「抬起」或依赖脚本停止时的自动释放。',
+    description: '按所选动作操作鼠标：单击/双击/滑动/长按/滚轮/移动到。',
     inputs: [_inExec()],
     outputs: [_outExec()],
     params: [
@@ -218,12 +212,22 @@ final List<NodeTypeDef> kNodeTypes = [
         options: kMouseActions,
       ),
       ParamFieldDef(
+        'button',
+        '鼠标键',
+        ParamType.enum_,
+        defaultValue: 'left',
+        options: _buttonOptions,
+        visibleWhen: const {
+          'action': {'click', 'doubleClick', 'longPress'},
+        },
+      ),
+      ParamFieldDef(
         'x',
         'X 坐标',
         ParamType.int,
         defaultValue: 100,
         visibleWhen: const {
-          'action': {'click', 'doubleClick', 'longPress', 'scroll', 'move', 'press'},
+          'action': {'click', 'doubleClick', 'longPress', 'scroll', 'move'},
         },
       ),
       ParamFieldDef(
@@ -232,17 +236,7 @@ final List<NodeTypeDef> kNodeTypes = [
         ParamType.int,
         defaultValue: 100,
         visibleWhen: const {
-          'action': {'click', 'doubleClick', 'longPress', 'scroll', 'move', 'press'},
-        },
-      ),
-      ParamFieldDef(
-        'button',
-        '鼠标键',
-        ParamType.enum_,
-        defaultValue: 'left',
-        options: _buttonOptions,
-        visibleWhen: const {
-          'action': {'click', 'doubleClick', 'longPress', 'press', 'release'},
+          'action': {'click', 'doubleClick', 'longPress', 'scroll', 'move'},
         },
       ),
       ParamFieldDef(
@@ -360,8 +354,8 @@ final List<NodeTypeDef> kNodeTypes = [
     category: NodeCategory.interaction,
     icon: Icons.keyboard_rounded,
     description:
-        '按所选动作操作键盘：按键/组合键/按下/抬起。'
-        '键位可从常用键下拉选择，或点「拾取」后按下实际按键。「按下」需搭配「抬起」。',
+        '按所选动作操作键盘：按键/组合键。'
+        '键位可从常用键下拉选择，或点「拾取」后按下实际按键。',
     inputs: [_inExec()],
     outputs: [_outExec()],
     params: [
@@ -378,7 +372,7 @@ final List<NodeTypeDef> kNodeTypes = [
         ParamType.key,
         defaultValue: 0,
         visibleWhen: const {
-          'action': {'tap', 'down', 'up'},
+          'action': {'tap'},
         },
       ),
       ParamFieldDef(
@@ -423,16 +417,13 @@ final List<NodeTypeDef> kNodeTypes = [
     title: '截图',
     category: NodeCategory.media,
     icon: Icons.screenshot_monitor_rounded,
-    description: '截取全屏或指定区域，供后续识别节点使用',
-    inputs: [
-      _inExec(),
-      _inData(
-        'image',
-        '输入图像(可空)',
-        note: '本节点不读取该输入——截图始终现场采集（全屏或上方设定的区域）；此端口保留以与其他媒体节点保持一致。',
-      ),
+    description: '截取全屏或指定区域（区域可用屏幕框选），供后续识别节点使用',
+    inputs: [_inExec()],
+    outputs: [
+      _outExec(),
+      _outData('imageOut', '图像',
+          note: '截取的屏幕图像，可连接「文字识别/图像识别」的图像输入'),
     ],
-    outputs: [_outExec(), _outData('imageOut', '图像')],
     params: _regionFields,
   ),
   NodeTypeDef(
@@ -453,9 +444,9 @@ final List<NodeTypeDef> kNodeTypes = [
     ],
     outputs: [
       _outExec(),
-      _outData('text', '文本'),
-      _outData('x', '区域X'),
-      _outData('y', '区域Y'),
+      _outData('text', '文本', note: '识别出的完整文本（字符串），可连接下游节点的数据输入'),
+      _outData('x', '区域X', note: '识别区域左上角在屏幕上的 X 坐标（未指定区域时为 0）'),
+      _outData('y', '区域Y', note: '识别区域左上角在屏幕上的 Y 坐标（未指定区域时为 0）'),
     ],
     params: [
       ..._regionFields,
@@ -483,10 +474,13 @@ final List<NodeTypeDef> kNodeTypes = [
     ],
     outputs: [
       _outExec(),
-      _outData('found', '是否命中'),
-      _outData('x', '命中X'),
-      _outData('y', '命中Y'),
-      _outData('score', '相似度'),
+      _outData('found', '是否命中',
+          note: '是否命中（true/false），可连接「条件判断」节点的数据输入'),
+      _outData('x', '命中X',
+          note: '命中区域中心在屏幕上的 X 坐标（未命中时为最佳匹配位置；区域模式时含区域偏移）'),
+      _outData('y', '命中Y',
+          note: '命中区域中心在屏幕上的 Y 坐标（未命中时为最佳匹配位置；区域模式时含区域偏移）'),
+      _outData('score', '相似度', note: '相似度得分（0.0~1.0，越接近 1 越相似）'),
     ],
     params: [
       ParamFieldDef(
@@ -551,15 +545,15 @@ final List<NodeTypeDef> kNodeTypes = [
         defaultValue: '',
       ),
       ParamFieldDef(
-        'rightVar',
-        '右值变量名(可空)',
-        ParamType.varName,
-        defaultValue: '',
-      ),
-      ParamFieldDef(
         'leftConst',
         '左值常量(无连接/变量时)',
         ParamType.string,
+        defaultValue: '',
+      ),
+      ParamFieldDef(
+        'rightVar',
+        '右值变量名(可空)',
+        ParamType.varName,
         defaultValue: '',
       ),
       ParamFieldDef(

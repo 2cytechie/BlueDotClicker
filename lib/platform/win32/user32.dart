@@ -1,6 +1,7 @@
 import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 
 /// Win32 user32.dll FFI 绑定（鼠标模拟、光标/按键状态、屏幕尺寸）
 final DynamicLibrary user32Lib = DynamicLibrary.open('user32.dll');
@@ -17,6 +18,7 @@ const int mouseeventfMiddledown = 0x0020;
 const int mouseeventfMiddleup = 0x0040;
 const int mouseeventfWheel = 0x0800;
 const int mouseeventfHwheel = 0x1000;
+const int mouseeventfVirtualdesk = 0x4000; // 绝对坐标基于整个虚拟桌面（多屏/负坐标）
 const int mouseeventfAbsolutemove = 0x8000;
 const int keyeventfExtendedkey = 0x0001;
 const int keyeventfKeyup = 0x0002;
@@ -146,6 +148,20 @@ final _mapVirtualKeyW =
 int screenW() => _getSystemMetrics(smCxscreen);
 int screenH() => _getSystemMetrics(smCyscreen);
 
+// 虚拟桌面（所有显示器的并集）：多屏/负坐标移动的归一化基准
+const int smXvirtualscreen = 76; // 虚拟桌面左上角 X（副屏在主屏左侧时为负）
+const int smYvirtualscreen = 77;
+const int smCxvirtualscreen = 78; // 虚拟桌面总宽
+const int smCyvirtualscreen = 79;
+
+/// 虚拟桌面原点与尺寸 (x, y, w, h)
+(int, int, int, int) virtualScreenRect() => (
+      _getSystemMetrics(smXvirtualscreen),
+      _getSystemMetrics(smYvirtualscreen),
+      _getSystemMetrics(smCxvirtualscreen),
+      _getSystemMetrics(smCyvirtualscreen),
+    );
+
 (int, int) cursorPos() {
   final p = _cursorBuf ??= calloc<_POINT>();
   _getCursorPos(p);
@@ -174,11 +190,33 @@ void _sendMouse(int flags, int dxNorm, int dyNorm, int mouseData) {
   calloc.free(p);
 }
 
+/// 像素坐标 → 绝对移动归一化值（0..65535）。[rect] 为虚拟桌面 (x, y, w, h)。
+/// 单独抽出为纯函数：多屏/负原点边界无需真实多显示器环境即可测试。
+@visibleForTesting
+(int, int) normalizeVirtual(int x, int y, (int, int, int, int) rect) {
+  final (vx, vy, vw, vh) = rect;
+  // 必须四舍五入：截断会使部分坐标反向换算后少 1 像素（moveAbsolute 落点偏移）
+  final nx = vw <= 1
+      ? 0
+      : ((x - vx) * 65535 / (vw - 1)).round().clamp(0, 65535);
+  final ny = vh <= 1
+      ? 0
+      : ((y - vy) * 65535 / (vh - 1)).round().clamp(0, 65535);
+  return (nx, ny);
+}
+
+/// 绝对坐标移动：基于整个虚拟桌面归一化（MOUSEEVENTF_VIRTUALDESK），
+/// 支持副屏与负坐标（副屏在主屏左侧时虚拟桌面原点为负）。
 void _moveToNorm(int x, int y) {
-  final w = screenW(), h = screenH();
-  final nx = (x * 65535 ~/ (w - 1)).clamp(0, 65535);
-  final ny = (y * 65535 ~/ (h - 1)).clamp(0, 65535);
-  _sendMouse(mouseeventfMove | mouseeventfAbsolutemove, nx, ny, 0);
+  final rect = virtualScreenRect();
+  if (rect.$3 <= 1 || rect.$4 <= 1) return;
+  final (nx, ny) = normalizeVirtual(x, y, rect);
+  _sendMouse(
+    mouseeventfMove | mouseeventfAbsolutemove | mouseeventfVirtualdesk,
+    nx,
+    ny,
+    0,
+  );
 }
 
 void moveTo(int x, int y) => _moveToNorm(x, y);

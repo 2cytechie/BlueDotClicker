@@ -11,10 +11,11 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-    test('GetCursorPos 返回屏幕范围内坐标', () {
+    test('GetCursorPos 返回虚拟桌面范围内坐标（多屏可为负）', () {
       final (x, y) = u32.cursorPos();
-      expect(x, inInclusiveRange(0, u32.screenW()));
-      expect(y, inInclusiveRange(0, u32.screenH()));
+      final (vx, vy, vw, vh) = u32.virtualScreenRect();
+      expect(x, inInclusiveRange(vx, vx + vw - 1));
+      expect(y, inInclusiveRange(vy, vy + vh - 1));
     });
 
     test('屏幕尺寸为正', () {
@@ -44,8 +45,10 @@ void main() {
       u32.moveAbsolute(x, y);
       u32.clickAt(x, y); // 在原位点击，无副作用
       final (x2, y2) = u32.cursorPos();
-      expect(x2, x);
-      expect(y2, y);
+      // 绝对坐标经 16 位归一化后再由系统换算回像素，存在 ±1px 量化误差；
+      // 多屏/负坐标下更明显，故断言允许 1px 偏差（本用例目的是"不抛异常"）
+      expect((x2 - x).abs(), lessThanOrEqualTo(1));
+      expect((y2 - y).abs(), lessThanOrEqualTo(1));
     });
 
     test('窗口/热键查询接口可调用（FFI 绑定有效）', () {
@@ -76,4 +79,41 @@ void main() {
       expect(cap.height, 1);
       expect(cap.bgra.length, 4);
     });
+
+  group('绝对坐标归一化（虚拟桌面）', () {
+    test('单屏：左上角映射 0，右下角映射 65535', () {
+      expect(u32.normalizeVirtual(0, 0, (0, 0, 1920, 1080)), (0, 0));
+      expect(
+        u32.normalizeVirtual(1919, 1079, (0, 0, 1920, 1080)),
+        (65535, 65535),
+      );
+    });
+
+    test('副屏在主屏左侧（负原点）：主屏右边缘映射到 65535', () {
+      const rect = (-1920, 0, 3840, 1080);
+      expect(u32.normalizeVirtual(-1920, 0, rect), (0, 0));
+      expect(u32.normalizeVirtual(1919, 1079, rect), (65535, 65535));
+    });
+
+    test('负坐标落在虚拟桌面内：归一化值随坐标单调递增', () {
+      const rect = (-1920, 0, 3840, 1080);
+      final (leftMost, _) = u32.normalizeVirtual(-1, 0, rect);
+      final (zero, _) = u32.normalizeVirtual(0, 0, rect);
+      expect(leftMost, greaterThan(0));
+      expect(leftMost, lessThan(65535));
+      expect(zero, greaterThan(leftMost));
+      // x=-1 应位于虚拟桌面中点附近（主屏左边界）
+      expect(zero - leftMost, closeTo(65535 / 3839, 1));
+    });
+
+    test('虚拟桌面外的坐标被钳制到边界，不产生负数/越界值', () {
+      const rect = (-1920, 0, 3840, 1080);
+      expect(u32.normalizeVirtual(-99999, -99999, rect), (0, 0));
+      expect(u32.normalizeVirtual(99999, 99999, rect), (65535, 65535));
+    });
+
+    test('退化尺寸（1×1）不除零', () {
+      expect(u32.normalizeVirtual(10, 10, (0, 0, 1, 1)), (0, 0));
+    });
+  });
 }

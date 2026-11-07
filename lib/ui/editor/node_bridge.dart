@@ -95,14 +95,16 @@ fl.NodeGraph blueprintToGraph(BlueprintScript script) => fl.NodeGraph(
       ],
     );
 
-/// 连线两端都存在且都是当前版本支持的节点类型
+/// 连线两端都存在、都是当前版本支持的节点类型，且两端的端口仍存在。
+/// 端口级过滤：端口被删（如 screenshot 的 image 输入）时连同连线一起丢弃，
+/// 否则会留下指向不存在端口的悬空引用导致画布异常。
 bool _edgeEndpointsKnown(BlueprintScript script, BPEdge e) {
   final from = script.nodes[e.from.nodeId];
   final to = script.nodes[e.to.nodeId];
-  return from != null &&
-      to != null &&
-      isKnownNodeType(from.type) &&
-      isKnownNodeType(to.type);
+  if (from == null || to == null) return false;
+  if (!isKnownNodeType(from.type) || !isKnownNodeType(to.type)) return false;
+  return nodeDef(from.type).outputs.any((p) => p.key == e.from.port) &&
+      nodeDef(to.type).inputs.any((p) => p.key == e.to.port);
 }
 
 /// 编辑器图模型 → BlueprintScript（保存/运行前调用）。

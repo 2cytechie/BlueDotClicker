@@ -4,9 +4,9 @@ import 'win32/user32.dart' as u32;
 
 /// 全局按键拾取器：30ms 轮询 `GetAsyncKeyState`，返回第一个"新按下"的虚拟键。
 ///
-/// 与坐标拾取同风格：进入时最小化本应用窗口（避免按键焦点留在编辑器里），
-/// 结束时恢复；Esc 取消。不做键盘钩子——轮询不干扰目标窗口，且 Ctrl/Shift
-/// 等修饰键先按的逻辑天然由"按顺序优先"满足。
+/// 轮询不依赖窗口焦点，拾取期间本应用窗口保持可见（不最小化）；Esc 取消。
+/// 不做键盘钩子——轮询不干扰目标窗口，且 Ctrl/Shift 等修饰键先按的逻辑
+/// 天然由"按顺序优先"满足。
 class KeyPicker {
   Timer? _timer;
   Completer<int?>? _completer;
@@ -21,8 +21,6 @@ class KeyPicker {
 
     // 基线：开始时已按住的键不算"新按下"（松开再按仍可拾取）
     var previous = _snapshot();
-    final hwnd = u32.ownForegroundWindow();
-    if (hwnd != 0) u32.minimizeWindow(hwnd);
 
     _timer = Timer.periodic(const Duration(milliseconds: 30), (_) {
       if (_completer == null) return;
@@ -48,7 +46,6 @@ class KeyPicker {
     } finally {
       _timer?.cancel();
       _timer = null;
-      if (hwnd != 0) u32.restoreWindow(hwnd);
     }
   }
 

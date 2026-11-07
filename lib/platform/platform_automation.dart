@@ -46,8 +46,6 @@ abstract interface class PlatformAutomation {
     MouseButton button = MouseButton.left,
     int count = 1,
   });
-  Future<void> press(int x, int y, {MouseButton button = MouseButton.left});
-  Future<void> release({MouseButton button = MouseButton.left});
   Future<void> swipe(int x1, int y1, int x2, int y2, {int durationMs = 300});
   Future<void> longPress(
     int x,
@@ -100,11 +98,6 @@ class UnsupportedPlatformAutomation implements PlatformAutomation {
     MouseButton button = MouseButton.left,
     int count = 1,
   }) => _deny();
-  @override
-  Future<void> press(int x, int y, {MouseButton button = MouseButton.left}) =>
-      _deny();
-  @override
-  Future<void> release({MouseButton button = MouseButton.left}) => _deny();
   @override
   Future<void> swipe(int x1, int y1, int x2, int y2, {int durationMs = 300}) =>
       _deny();

@@ -1193,6 +1193,8 @@ class _EditPanel extends StatelessWidget {
       width: 150,
       child: DropdownButtonFormField<String>(
         initialValue: c.button,
+        dropdownColor: AppColors.moonWhite,
+        borderRadius: kDropdownMenuRadius,
         decoration: const InputDecoration(labelText: '按键'),
         items: const [
           DropdownMenuItem(value: 'left', child: Text('左键')),

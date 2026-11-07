@@ -560,3 +560,89 @@ class ScreenMarkerService {
   int _hitTest(int x, int y) =>
       markerHitTest(_points, x, y, (_hitRadiusLogic * _dpr).round());
 }
+
+/// 屏幕绿色边框服务：分层置顶穿透窗口绘制绿色矩形描边。
+/// 用途：坐标拾取时提示虚拟桌面范围；区域框选时实时预览当前拖拽矩形。
+/// 渲染复用 _LayeredWindow（容量策略：窗口按 256px 粒度增长优先复用，
+/// 拖拽中矩形增长不再频繁销毁重建）。
+class ScreenBorderService {
+  static const _strokePx = 5; // 描边宽度（物理像素）
+  static const _green = 0xFF4CC79A; // AppColors.success
+  static const _quantum = 256; // 窗口容量量化粒度（物理像素）
+
+  final _LayeredWindow _window = _LayeredWindow();
+  int _renderSeq = 0;
+  Future<bool>? _lastRender;
+
+  /// 画布尺寸（含描边溢出，向上量化到 [_quantum]）。
+  /// 必须与分层窗口容量保持一致：`updateFromRgba` 要求像素长度 == 窗口宽×高×4。
+  @visibleForTesting
+  static (int, int) canvasSize(int w, int h) => (
+        (w + 2 * _strokePx + _quantum - 1) & ~(_quantum - 1),
+        (h + 2 * _strokePx + _quantum - 1) & ~(_quantum - 1),
+      );
+
+  /// 最近一次渲染是否成功（测试用）
+  @visibleForTesting
+  Future<bool> get debugLastRender => _lastRender ?? Future.value(false);
+
+  @visibleForTesting
+  int get debugWindowWidth => _window.width;
+
+  @visibleForTesting
+  int get debugWindowHeight => _window.height;
+
+  /// 在矩形 (x,y,w,h) 边缘绘制绿色描边；矩形 = 整个虚拟桌面时即"屏幕边缘提示"。
+  /// 窗口覆盖矩形外扩一个描边宽度（描边中心对齐矩形边缘）。
+  void showRect(int x, int y, int w, int h) {
+    if (w <= 0 || h <= 0) return;
+    final s = _strokePx;
+    final (cw, ch) = canvasSize(w, h);
+    // 容量必须与渲染画布严格一致（不能用"能装下就复用"：
+    // 1) 尺寸不一致时 updateFromRgba 会因像素数不符直接失败；
+    // 2) 全屏提示窗口被拖拽预览复用会每帧渲染整屏，开销过大）
+    if (!_window.isValid || _window.width != cw || _window.height != ch) {
+      _window.create(x - s, y - s, cw, ch);
+      if (!_window.isValid) return;
+    }
+    _lastRender = _render(x - s, y - s, cw, ch, w, h);
+  }
+
+  /// 隐藏边框：销毁分层窗口（窗口即内容，销毁即彻底消失）
+  void hide() {
+    _renderSeq++;
+    _window.destroy();
+  }
+
+  /// 离屏渲染绿色描边并上屏；[canvasW]/[canvasH] 为窗口容量，
+  /// [rectW]/[rectH] 为需要描边的矩形尺寸（在画布内偏移一个描边宽）。
+  Future<bool> _render(
+    int winX,
+    int winY,
+    int canvasW,
+    int canvasH,
+    int rectW,
+    int rectH,
+  ) async {
+    final seq = ++_renderSeq;
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    final s = _strokePx.toDouble();
+    // 描边中心对齐矩形边缘：矩形在画布内偏移一个描边宽
+    canvas.drawRect(
+      ui.Rect.fromLTWH(s, s, rectW.toDouble(), rectH.toDouble()),
+      ui.Paint()
+        ..color = const ui.Color(_green)
+        ..style = ui.PaintingStyle.stroke
+        ..strokeWidth = s
+        ..isAntiAlias = true,
+    );
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(canvasW, canvasH);
+    final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    picture.dispose();
+    image.dispose();
+    if (seq != _renderSeq || data == null) return false; // 过期渲染（已 hide/重绘）
+    return _window.updateFromRgba(data.buffer.asUint8List(), winX, winY);
+  }
+}

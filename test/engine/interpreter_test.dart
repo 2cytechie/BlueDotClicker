@@ -40,18 +40,6 @@ class MockAutomation implements PlatformAutomation {
   }
 
   @override
-  Future<void> press(int x, int y, {MouseButton button = MouseButton.left}) async {
-    _check();
-    calls.add('press($x,$y,${button.name})');
-  }
-
-  @override
-  Future<void> release({MouseButton button = MouseButton.left}) async {
-    _check();
-    calls.add('release(${button.name})');
-  }
-
-  @override
   Future<void> swipe(int x1, int y1, int x2, int y2, {int durationMs = 300}) async {
     _check();
     calls.add('swipe($x1,$y1->$x2,$y2)');
@@ -220,51 +208,39 @@ void main() {
       expect(auto.calls.where((c) => c == 'click(1,2,count:1,left)').length, 3);
     });
 
-    test('鼠标动作：双击/滚轮/移动/按住/抬起/长按', () async {
+    test('鼠标动作：双击/滚轮/移动/长按', () async {
       final s = _build([
         _node('a', 'start'),
         _mouse('d', 'doubleClick', {'x': 5, 'y': 6, 'button': 'middle'}),
         _mouse('sc', 'scroll', {'x': 7, 'y': 8, 'dx': 0, 'dy': 240}),
         _mouse('mv', 'move', {'x': 9, 'y': 10}),
-        _mouse('pr', 'press', {'x': 11, 'y': 12, 'button': 'right'}),
-        _mouse('rl', 'release', {'button': 'right'}),
         _mouse('lp', 'longPress', {'x': 13, 'y': 14, 'holdMs': 1, 'button': 'middle'}),
       ], [
         _edge('e1', 'a', 'out', 'd', 'in'),
         _edge('e2', 'd', 'out', 'sc', 'in'),
         _edge('e3', 'sc', 'out', 'mv', 'in'),
-        _edge('e4', 'mv', 'out', 'pr', 'in'),
-        _edge('e5', 'pr', 'out', 'rl', 'in'),
-        _edge('e6', 'rl', 'out', 'lp', 'in'),
+        _edge('e4', 'mv', 'out', 'lp', 'in'),
       ]);
       final auto = MockAutomation();
       await _run(s, auto: auto);
       expect(auto.calls, contains('click(5,6,count:2,middle)'));
       expect(auto.calls, contains('scrollWheel(7,8,dy:240,dx:0)'));
       expect(auto.calls, contains('move(9,10)'));
-      expect(auto.calls, contains('press(11,12,right)'));
-      expect(auto.calls, contains('release(right)'));
       expect(auto.calls, contains('longPress(13,14,1,middle)'));
     });
 
-    test('键盘动作：按键/组合键/按下/抬起', () async {
+    test('键盘动作：按键/组合键', () async {
       final s = _build([
         _node('a', 'start'),
         _keyboard('t', 'tap', {'vkCode': 0x41}), // A
-        _keyboard('dn', 'down', {'vkCode': 0x10}), // Shift
-        _keyboard('up', 'up', {'vkCode': 0x10}),
         _keyboard('cb', 'combo', {'comboKeys': [0x11, 0x43], 'durationMs': 1}), // Ctrl+C
       ], [
         _edge('e1', 'a', 'out', 't', 'in'),
-        _edge('e2', 't', 'out', 'dn', 'in'),
-        _edge('e3', 'dn', 'out', 'up', 'in'),
-        _edge('e4', 'up', 'out', 'cb', 'in'),
+        _edge('e2', 't', 'out', 'cb', 'in'),
       ]);
       final auto = MockAutomation();
       await _run(s, auto: auto);
       expect(auto.calls, contains('keyTap(65,60,ext:false)'));
-      expect(auto.calls, contains('keyDown(16,ext:false)'));
-      expect(auto.calls, contains('keyUp(16,ext:false)'));
       // 组合键：顺序按下、逆序抬起
       final comboDown = auto.calls.indexOf('keyDown(17,ext:false)');
       final comboCDown = auto.calls.indexOf('keyDown(67,ext:false)');
@@ -292,16 +268,15 @@ void main() {
       expect(logs, contains('未设置组合键'));
     });
 
-    test('停止时释放未抬起的鼠标键与按键', () async {
+    test('停止时已按下的组合键被释放，不残留按键', () async {
       final s = _build([
         _node('a', 'start'),
-        _mouse('pr', 'press', {'x': 1, 'y': 2, 'button': 'left'}),
-        _keyboard('dn', 'down', {'vkCode': 0x41}),
+        // 组合键按住期间（durationMs 内）被 stop，已按下的键必须被释放
+        _keyboard('cb', 'combo', {'comboKeys': [0x41, 0x42], 'durationMs': 5000}),
         _node('d', 'delay', {'ms': 5000}),
       ], [
-        _edge('e1', 'a', 'out', 'pr', 'in'),
-        _edge('e2', 'pr', 'out', 'dn', 'in'),
-        _edge('e3', 'dn', 'out', 'd', 'in'),
+        _edge('e1', 'a', 'out', 'cb', 'in'),
+        _edge('e2', 'cb', 'out', 'd', 'in'),
       ]);
       final auto = MockAutomation();
       final hooks = Hooks();
@@ -312,8 +287,8 @@ void main() {
       );
       Future<void>.delayed(const Duration(milliseconds: 80), engine.stop);
       await engine.run(s);
-      expect(auto.calls, contains('release(left)'));
       expect(auto.calls, contains('keyUp(65,ext:false)'));
+      expect(auto.calls, contains('keyUp(66,ext:false)'));
     });
 
     test('条件分支走向 true/false 出口', () async {
@@ -578,6 +553,76 @@ void main() {
       final out = BlueprintInterpreter.cropImage(src, const RectPx(80, 90, 50, 50));
       expect(out.width, 20);
       expect(out.height, 10);
+    });
+  });
+
+  group('已删除动作的旧脚本降级', () {
+    test('mouse press/release：不执行任何鼠标动作，仅记录未知动作', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _mouse('p', 'press', {'x': 10, 'y': 20, 'button': 'left'}),
+        _mouse('r', 'release', {'button': 'right'}),
+      ], [
+        _edge('e1', 'a', 'out', 'p', 'in'),
+        _edge('e2', 'p', 'out', 'r', 'in'),
+      ]);
+      final auto = MockAutomation();
+      final hooks = Hooks();
+      await _run(s, auto: auto, hooks: hooks);
+      expect(auto.calls, isEmpty);
+      expect(
+        hooks.logs.where((l) => l.contains('鼠标操作失败：未知动作')).length,
+        2,
+      );
+      expect(hooks.logs.join(), contains('✓ 执行完成'));
+    });
+
+    test('keyboard down/up：不注入任何按键，仅记录未知动作', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _keyboard('d', 'down', {'vkCode': 0x41}),
+        _keyboard('u', 'up', {'vkCode': 0x41}),
+      ], [
+        _edge('e1', 'a', 'out', 'd', 'in'),
+        _edge('e2', 'd', 'out', 'u', 'in'),
+      ]);
+      final auto = MockAutomation();
+      final hooks = Hooks();
+      await _run(s, auto: auto, hooks: hooks);
+      expect(auto.calls, isEmpty);
+      expect(
+        hooks.logs.where((l) => l.contains('键盘操作失败：未知动作')).length,
+        2,
+      );
+      expect(hooks.logs.join(), contains('✓ 执行完成'));
+    });
+  });
+
+  group('OCR 输出坐标语义', () {
+    test('x/y 输出端口是识别区域原点（未指定区域时为 0）', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('o', 'ocr', {
+          'useRegion': true,
+          'rx': 10,
+          'ry': 20,
+          'rw': 30,
+          'rh': 40,
+          'resultVar': 'txt',
+        }),
+        _node('vx', 'setVar', {'name': 'vx'}),
+        _node('vy', 'setVar', {'name': 'vy'}),
+      ], [
+        _edge('e1', 'a', 'out', 'o', 'in'),
+        _edge('e2', 'o', 'out', 'vx', 'in'),
+        _edge('e3', 'vx', 'out', 'vy', 'in'),
+        _edge('e4', 'o', 'x', 'vx', 'value', kind: EdgeKind.data),
+        _edge('e5', 'o', 'y', 'vy', 'value', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s);
+      // 不是识别文本的位置，而是区域左上角（当前实现）
+      expect(vars['vx'], 10);
+      expect(vars['vy'], 20);
     });
   });
 }

@@ -158,12 +158,10 @@ class _NodeBodyContent extends StatelessWidget {
               lines.add('dx=${v('dx')} dy=${v('dy')}');
             case 'move':
               lines.add('→ (${v('x')}, ${v('y')})');
-            case 'release':
-              lines.add(_buttonName(v('button')));
             case 'longPress':
               lines.add('(${v('x')}, ${v('y')}) ${_buttonName(v('button'))}');
               lines.add('保持 ${v('holdMs')}ms');
-            default: // click / doubleClick / press
+            default: // click / doubleClick
               lines.add('(${v('x')}, ${v('y')}) ${_buttonName(v('button'))}');
           }
         }
