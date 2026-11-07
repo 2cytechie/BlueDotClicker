@@ -23,10 +23,13 @@ void main() {
       expect(u32.screenH(), greaterThan(0));
     });
 
-    test('GDI 全屏截屏返回正确尺寸的 BGRA 数据', () {
+    test('GDI 全屏截屏覆盖整个虚拟桌面并返回原点', () {
       final cap = gdi.captureScreen();
-      expect(cap.width, u32.screenW());
-      expect(cap.height, u32.screenH());
+      final (vx, vy, vw, vh) = u32.virtualScreenRect();
+      final hasVirtual = vw > 0 && vh > 0;
+      expect(cap.width, hasVirtual ? vw : u32.screenW());
+      expect(cap.height, hasVirtual ? vh : u32.screenH());
+      expect((cap.x, cap.y), hasVirtual ? (vx, vy) : (0, 0));
       expect(cap.bgra.length, cap.width * cap.height * 4);
       // 真实屏幕不应是纯黑帧（统计非零字节）
       final nonZero = cap.bgra.where((b) => b != 0).length;
@@ -71,6 +74,31 @@ void main() {
       test('负起点与超大宽高：钳到屏幕内', () {
         expect(gdi.clampRegionToScreen(-20, -20, 5000, 5000, 1920, 1080), (0, 0, 1920, 1080));
       });
+
+      test('虚拟桌面负原点（副屏在主屏左侧）：负坐标区域原样保留', () {
+        // 虚拟桌面 (-1920,0,3840,1080)：副屏区域不应被钳到 0
+        expect(
+          gdi.clampRegionToScreen(-1500, 100, 400, 300, 3840, 1080, originX: -1920),
+          (-1500, 100, 400, 300),
+        );
+        // 越过虚拟桌面左边界时钳到原点（-1920），而不是主屏 0
+        expect(
+          gdi.clampRegionToScreen(-2000, 100, 400, 300, 3840, 1080, originX: -1920),
+          (-1920, 100, 400, 300),
+        );
+        // 越过右边界时收缩宽度
+        expect(
+          gdi.clampRegionToScreen(1800, 100, 400, 300, 3840, 1080, originX: -1920),
+          (1800, 100, 120, 300),
+        );
+      });
+
+      test('虚拟桌面负 Y 原点（副屏在主屏上方）同样保留负起点', () {
+        expect(
+          gdi.clampRegionToScreen(100, -800, 300, 200, 1920, 2160, originY: -1080),
+          (100, -800, 300, 200),
+        );
+      });
     });
 
     test('GDI 越界区域截屏不抛异常（区域被钳制）', () {
@@ -78,6 +106,17 @@ void main() {
       expect(cap.width, 1);
       expect(cap.height, 1);
       expect(cap.bgra.length, 4);
+    });
+
+    test('负 X 区域截屏返回请求尺寸与负原点（需副屏在主屏左侧）', () {
+      final (vx, vy, vw, vh) = u32.virtualScreenRect();
+      if (vx >= 0) {
+        // 单屏或副屏在右侧：本机没有负 X 可测，仅验证钳制基准
+        return;
+      }
+      final cap = gdi.captureScreen(region: RectPx(vx + 10, vy + 10, 40, 30));
+      expect((cap.x, cap.y), (vx + 10, vy + 10), reason: '采集原点应保留负坐标');
+      expect((cap.width, cap.height), (40, 30), reason: '负坐标区域不应被钳成主屏内容');
     });
 
   group('绝对坐标归一化（虚拟桌面）', () {

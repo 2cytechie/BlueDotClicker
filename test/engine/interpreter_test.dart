@@ -5,8 +5,8 @@ import 'package:bluedot_clicker/engine/interpreter.dart';
 import 'package:bluedot_clicker/engine/variables.dart';
 import 'package:bluedot_clicker/models/blueprint.dart';
 import 'package:bluedot_clicker/platform/platform_automation.dart';
+import 'package:bluedot_clicker/services/file_saver.dart';
 import 'package:bluedot_clicker/services/recognition.dart';
-import 'package:bluedot_clicker/services/script_storage.dart' show DataStore;
 import 'package:flutter_test/flutter_test.dart';
 
 // ---- 测试替身 ----
@@ -14,6 +14,13 @@ import 'package:flutter_test/flutter_test.dart';
 class MockAutomation implements PlatformAutomation {
   final List<String> calls = [];
   bool supported = true;
+
+  /// 全屏采集时图像左上角的屏幕坐标（模拟副屏在主屏左侧时可为负）
+  int captureX = 0;
+  int captureY = 0;
+
+  /// 最近一次采集请求的区域（验证截图节点是否传入区域参数）
+  RectPx? lastRegion;
 
   @override
   bool get isSupported => supported;
@@ -79,9 +86,16 @@ class MockAutomation implements PlatformAutomation {
   Future<ScreenCapture> capture({RectPx? region}) async {
     _check();
     calls.add('capture');
+    lastRegion = region;
     final w = region?.w ?? 100;
     final h = region?.h ?? 100;
-    return ScreenCapture(w, h, Uint8List(w * h * 4));
+    return ScreenCapture(
+      w,
+      h,
+      Uint8List(w * h * 4),
+      x: region?.x ?? captureX,
+      y: region?.y ?? captureY,
+    );
   }
 
   @override
@@ -206,6 +220,40 @@ void main() {
       final auto = MockAutomation();
       await _run(s, auto: auto);
       expect(auto.calls.where((c) => c == 'click(1,2,count:1,left)').length, 3);
+    });
+
+    test('鼠标坐标由 X/Y 数据输入决定（覆盖参数值）', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('sx', 'setVar', {'name': 'px', 'const': '777'}),
+        _node('sy', 'setVar', {'name': 'py', 'const': '888'}),
+        _mouse('m', 'click', {'x': 10, 'y': 20}),
+      ], [
+        _edge('e1', 'a', 'out', 'sx', 'in'),
+        _edge('e2', 'sx', 'out', 'sy', 'in'),
+        _edge('e3', 'sy', 'out', 'm', 'in'),
+        _edge('d1', 'sx', 'valueOut', 'm', 'x', kind: EdgeKind.data),
+        _edge('d2', 'sy', 'valueOut', 'm', 'y', kind: EdgeKind.data),
+      ]);
+      final auto = MockAutomation();
+      await _run(s, auto: auto);
+      expect(
+        auto.calls,
+        contains('click(777,888,count:1,left)'),
+        reason: 'X/Y 输入已连接时以输入值为准，参数坐标被忽略',
+      );
+    });
+
+    test('X/Y 输入未连接时仍使用参数坐标', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _mouse('m', 'click', {'x': 10, 'y': 20}),
+      ], [
+        _edge('e1', 'a', 'out', 'm', 'in'),
+      ]);
+      final auto = MockAutomation();
+      await _run(s, auto: auto);
+      expect(auto.calls, contains('click(10,20,count:1,left)'));
     });
 
     test('鼠标动作：双击/滚轮/移动/长按', () async {
@@ -356,26 +404,185 @@ void main() {
       expect(vars['ocrText'], '测试文本');
     });
 
-    test('数据存取节点持久化', () async {
-      DataStore.overrideDir(Directory.systemTemp);
-      final s1 = _build([
+    test('获取变量：输出所选变量当前值', () async {
+      final s = _build([
         _node('a', 'start'),
-        _node('set', 'setVar', {'name': 'persistMe', 'const': 'v1'}),
-        _node('save', 'storage', {'action': 'save', 'key': 'k1', 'name': 'persistMe'}),
+        _node('set', 'setVar', {'name': 'count', 'const': '7'}),
+        _node('get', 'getVar', {'name': 'count'}),
+        _node('copy', 'setVar', {'name': 'copyOf', 'const': ''}),
       ], [
         _edge('e1', 'a', 'out', 'set', 'in'),
-        _edge('e2', 'set', 'out', 'save', 'in'),
+        _edge('e2', 'set', 'out', 'get', 'in'),
+        _edge('e3', 'get', 'out', 'copy', 'in'),
+        _edge('d1', 'get', 'value', 'copy', 'value', kind: EdgeKind.data),
       ]);
-      await _run(s1);
-      final s2 = _build([
+      final vars = await _run(s);
+      expect(vars['copyOf'], 7);
+    });
+
+    test('获取变量：变量未初始化时输出空字符串', () async {
+      final s = _build([
         _node('a', 'start'),
-        _node('load', 'storage', {'action': 'load', 'key': 'k1', 'name': 'loaded'}),
+        _node('get', 'getVar', {'name': 'neverSet'}),
+        _node('copy', 'setVar', {'name': 'copyOf', 'const': ''}),
       ], [
-        _edge('e1', 'a', 'out', 'load', 'in'),
+        _edge('e1', 'a', 'out', 'get', 'in'),
+        _edge('e2', 'get', 'out', 'copy', 'in'),
+        _edge('d1', 'get', 'value', 'copy', 'value', kind: EdgeKind.data),
       ]);
-      final vars = await _run(s2);
-      expect(vars['loaded'], 'v1');
-      DataStore.overrideDir(Directory.systemTemp.parent);
+      final vars = await _run(s);
+      expect(vars['copyOf'], '');
+    });
+
+    test('数据保存：文本输入保存为 .txt（含识别文本）并透传文本输出', () async {
+      final tmp = await Directory.systemTemp.createTemp('bpc_save_test');
+      addTearDown(() async {
+        SaveFileService.overrideDir(Directory.systemTemp.parent);
+        try {
+          await tmp.delete(recursive: true);
+        } catch (_) {}
+      });
+      SaveFileService.overrideDir(tmp);
+      final s = _build([
+        _node('a', 'start'),
+        _node('o', 'ocr', {'resultVar': 'ocrText', 'useRegion': false}),
+        _node('save', 'saveData', {'fileName': 'note'}),
+        _node('copy', 'setVar', {'name': 'savedText', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'o', 'in'),
+        _edge('e2', 'o', 'out', 'save', 'in'),
+        _edge('e3', 'save', 'out', 'copy', 'in'),
+        _edge('d1', 'o', 'text', 'save', 'text', kind: EdgeKind.data),
+        _edge('d2', 'save', 'textOut', 'copy', 'value', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s);
+      // 文本经「文本」透传输出继续流向下游
+      expect(vars['savedText'], '测试文本');
+      final saved = File('${tmp.path}/save/note.txt');
+      expect(saved.existsSync(), isTrue, reason: '文件应实际落盘');
+      expect(await saved.readAsString(), '测试文本');
+      // 再跑一次 → 同名加序号，不覆盖
+      await _run(_build([
+        _node('a', 'start'),
+        _node('o', 'ocr', {'resultVar': 'ocrText', 'useRegion': false}),
+        _node('save', 'saveData', {'fileName': 'note'}),
+      ], [
+        _edge('e1', 'a', 'out', 'o', 'in'),
+        _edge('e2', 'o', 'out', 'save', 'in'),
+        _edge('d1', 'o', 'text', 'save', 'text', kind: EdgeKind.data),
+      ]));
+      final again = File('${tmp.path}/save/note-1.txt');
+      expect(again.existsSync(), isTrue, reason: '同名文件应自动加序号');
+      expect(await again.readAsString(), '测试文本');
+      expect(saved.existsSync(), isTrue, reason: '原文件不被覆盖');
+    });
+
+    test('数据保存：图像输入保存为 .png 并透传图像输出', () async {
+      final tmp = await Directory.systemTemp.createTemp('bpc_save_img_test');
+      addTearDown(() async {
+        SaveFileService.overrideDir(Directory.systemTemp.parent);
+        try {
+          await tmp.delete(recursive: true);
+        } catch (_) {}
+      });
+      SaveFileService.overrideDir(tmp);
+      final s = _build([
+        _node('a', 'start'),
+        _node('shot', 'screenshot', {'useRegion': false}),
+        _node('save', 'saveData', {'fileName': 'shot'}),
+        _node('copy', 'setVar', {'name': 'img', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'shot', 'in'),
+        _edge('e2', 'shot', 'out', 'save', 'in'),
+        _edge('e3', 'save', 'out', 'copy', 'in'),
+        _edge('d1', 'shot', 'imageOut', 'save', 'image', kind: EdgeKind.data),
+        _edge('d2', 'save', 'imageOut', 'copy', 'value', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s);
+      expect(vars['img'], isA<RawImage>(), reason: '图像经「图像」透传输出继续流向下游');
+      final f = File('${tmp.path}/save/shot.png');
+      expect(f.existsSync(), isTrue, reason: '截图应保存为 png');
+      final bytes = await f.readAsBytes();
+      // PNG 魔数：89 50 4E 47
+      expect(bytes.sublist(0, 4), [0x89, 0x50, 0x4E, 0x47]);
+    });
+
+    test('数据保存：未连接文本/图像输入时不生成文件、不透传', () async {
+      final tmp = await Directory.systemTemp.createTemp('bpc_save_none_test');
+      addTearDown(() async {
+        SaveFileService.overrideDir(Directory.systemTemp.parent);
+        try {
+          await tmp.delete(recursive: true);
+        } catch (_) {}
+      });
+      SaveFileService.overrideDir(tmp);
+      final s = _build([
+        _node('a', 'start'),
+        _node('save', 'saveData', {'fileName': 'nothing'}),
+        _node('copy', 'setVar', {'name': 'copyOf', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'save', 'in'),
+        _edge('e2', 'save', 'out', 'copy', 'in'),
+        _edge('d1', 'save', 'textOut', 'copy', 'value', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s);
+      expect(vars['copyOf'], '', reason: '无输入时透传输出无值，setVar 回退常量');
+      expect(Directory('${tmp.path}/save').existsSync(), isFalse,
+          reason: '未保存任何文件时不应创建 save 目录');
+    });
+
+    test('OCR 识别文本变量名由「识别文本」输入连接决定（覆盖参数值）', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('src', 'setVar', {'name': 'varNameHolder', 'const': 'myTarget'}),
+        _node('o', 'ocr', {'resultVar': 'ocrText', 'useRegion': false}),
+      ], [
+        _edge('e1', 'a', 'out', 'src', 'in'),
+        _edge('e2', 'src', 'out', 'o', 'in'),
+        _edge('d1', 'src', 'valueOut', 'o', 'resultVar', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s);
+      expect(vars['myTarget'], '测试文本', reason: '变量名应取自输入连接而非参数');
+      expect(vars['ocrText'], isNull, reason: '参数值不再被写入');
+    });
+
+    test('OCR 是否命中输出（识别文本非空为 true）', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('o', 'ocr', {'resultVar': '', 'useRegion': false}),
+        _node('copy', 'setVar', {'name': 'hit', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'o', 'in'),
+        _edge('e2', 'o', 'out', 'copy', 'in'),
+        _edge('d1', 'o', 'found', 'copy', 'value', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s);
+      expect(vars['hit'], true);
+    });
+
+    test('OCR 坐标输出为识别区域中心点（区域坐标X + 区域宽/2）', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('o', 'ocr', {
+          'resultVar': '',
+          'useRegion': true,
+          'rx': 100,
+          'ry': 200,
+          'rw': 300,
+          'rh': 400,
+        }),
+        _node('cx', 'setVar', {'name': 'cx', 'const': ''}),
+        _node('cy', 'setVar', {'name': 'cy', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'o', 'in'),
+        _edge('e2', 'o', 'out', 'cx', 'in'),
+        _edge('e3', 'cx', 'out', 'cy', 'in'),
+        _edge('d1', 'o', 'x', 'cx', 'value', kind: EdgeKind.data),
+        _edge('d2', 'o', 'y', 'cy', 'value', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s);
+      expect(vars['cx'], 100 + 300 ~/ 2, reason: '区域坐标X + 区域宽/2');
+      expect(vars['cy'], 200 + 400 ~/ 2, reason: '区域坐标Y + 区域高/2');
     });
 
     test('滑动参数解析（方向模式）与坐标模式', () async {
@@ -599,7 +806,7 @@ void main() {
   });
 
   group('OCR 输出坐标语义', () {
-    test('x/y 输出端口是识别区域原点（未指定区域时为 0）', () async {
+    test('x/y 输出端口是识别区域中心点（区域坐标X + 区域宽/2）', () async {
       final s = _build([
         _node('a', 'start'),
         _node('o', 'ocr', {
@@ -620,9 +827,90 @@ void main() {
         _edge('e5', 'o', 'y', 'vy', 'value', kind: EdgeKind.data),
       ]);
       final vars = await _run(s);
-      // 不是识别文本的位置，而是区域左上角（当前实现）
-      expect(vars['vx'], 10);
-      expect(vars['vy'], 20);
+      expect(vars['vx'], 10 + 30 ~/ 2, reason: '区域坐标X + 区域宽/2');
+      expect(vars['vy'], 20 + 40 ~/ 2, reason: '区域坐标Y + 区域高/2');
+    });
+  });
+
+  group('负坐标截屏（副屏在主屏左侧）', () {
+    RawImage blank(int w, int h) => RawImage(w, h, Uint8List(w * h * 4));
+
+    test('cropImage 按图像原点换算屏幕坐标，负区域不再折回左上角', () {
+      final src = blank(1920, 1080); // 图像原点 (-1920, 0)
+      final out = BlueprintInterpreter.cropImage(
+        src,
+        const RectPx(-1500, 100, 400, 300),
+        originX: -1920,
+      );
+      expect((out.width, out.height), (400, 300));
+
+      // 不传原点时同一区域会被钳成 1 像素宽——证明原点换算确实生效
+      final wrong = BlueprintInterpreter.cropImage(
+        src,
+        const RectPx(-1500, 100, 400, 300),
+      );
+      expect(wrong.width, 1);
+    });
+
+    test('截图节点读取区域参数并把负坐标原样传给截屏', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('shot', 'screenshot', {
+          'useRegion': true,
+          'rx': -1500,
+          'ry': 100,
+          'rw': 400,
+          'rh': 300,
+        }),
+      ], [
+        _edge('e1', 'a', 'out', 'shot', 'in'),
+      ]);
+      final auto = MockAutomation();
+      await _run(s, auto: auto);
+
+      final r = auto.lastRegion;
+      expect(r, isNotNull, reason: '运行时必须按区域采集');
+      expect((r!.x, r.y, r.w, r.h), (-1500, 100, 400, 300));
+    });
+
+    test('截图输出的图像原点是区域左上角，识别 x 输出负的区域中心', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('shot', 'screenshot', {
+          'useRegion': true,
+          'rx': -1500,
+          'ry': 100,
+          'rw': 400,
+          'rh': 300,
+        }),
+        _node('o', 'ocr', {'resultVar': 'txt'}),
+        _node('copy', 'setVar', {'name': 'x', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'shot', 'in'),
+        _edge('e2', 'shot', 'out', 'o', 'in'),
+        _edge('e3', 'o', 'out', 'copy', 'in'),
+        _edge('d1', 'shot', 'imageOut', 'o', 'image', kind: EdgeKind.data),
+        _edge('d2', 'o', 'x', 'copy', 'value', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s);
+      // 上游图像为负坐标区域截图（400×300），OCR 未框选 → 输出该图像中心
+      expect(vars['x'], -1500 + 400 ~/ 2, reason: '识别坐标应保持负的屏幕坐标语义');
+    });
+
+    test('未指定区域时识别坐标以截屏图像原点为基准（图像中心）', () async {
+      final auto = MockAutomation()..captureX = -1920;
+      final s = _build([
+        _node('a', 'start'),
+        _node('o', 'ocr', {'resultVar': 'txt', 'useRegion': false}),
+        _node('copy', 'setVar', {'name': 'x', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'o', 'in'),
+        _edge('e2', 'o', 'out', 'copy', 'in'),
+        _edge('d1', 'o', 'x', 'copy', 'value', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s, auto: auto);
+      // 全屏截图原点 -1920、Mock 图像 100×100 → 中心 = -1920 + 50
+      expect(vars['x'], -1920 + 50);
     });
   });
 }

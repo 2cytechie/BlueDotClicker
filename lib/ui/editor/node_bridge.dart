@@ -1,5 +1,5 @@
 import 'package:fl_nodes_v2/fl_nodes_v2.dart' as fl;
-import 'package:flutter/material.dart' show Color, Offset;
+import 'package:flutter/material.dart' show Color, Colors, Offset;
 
 import '../../core/theme.dart';
 import '../../models/blueprint.dart';
@@ -161,3 +161,46 @@ bool blueprintConnectionValidator(fl.ConnectionCheck check) {
   }
   return true;
 }
+
+/// 数据输入接入后，同名节点参数不再生效（如鼠标 X/Y 坐标改由上游数据决定），
+/// 连接建立时把该参数归零——否则属性面板/节点摘要会继续显示旧的手填值。
+/// 参数本来已是 0 或端口不对应参数时不写入（返回 false）。
+bool zeroParamOverriddenByInput(
+  fl.NodeEditorController controller,
+  fl.NodeConnection connection,
+) {
+  final node = controller.graph.nodes[connection.to.nodeId];
+  if (node == null) return false;
+  final def = nodeDef(node.type);
+  final key = connection.to.portId;
+  final overridden =
+      def.inputs.any((p) => p.kind == PortKind.data && p.key == key) &&
+      def.params.any((f) => f.key == key);
+  if (!overridden) return false;
+  final current = node.data[key];
+  final isZero = current is num
+      ? current == 0
+      : int.tryParse('${current ?? ''}') == 0;
+  if (isZero) return false;
+  controller.updateNode(node.id, (n) => n.withData({key: 0}));
+  return true;
+}
+
+/// 画布上所有 varName 类参数填写的非空变量名（节点库「变量」分类与
+/// varName 字段下拉共用），已去重；展示排序由调用方决定。
+Set<String> graphVarNames(fl.NodeGraph graph) => {
+      for (final n in graph.nodes.values)
+        for (final f in nodeDef(n.type).params)
+          if (f.type == ParamType.varName)
+            if (((n.data[f.key] as String?) ?? '').trim().isNotEmpty)
+              ((n.data[f.key] as String?) ?? '').trim(),
+    };
+
+/// 连线常态颜色：执行流（control 端口）白色、数据连线绿色。
+/// 选中/悬停/拖拽预览线仍由编辑器主题控制（高亮态需与常态区分）。
+fl.ConnectionAppearance connectionAppearanceFor(fl.NodePort from) =>
+    fl.ConnectionAppearance(
+      color: from.kind == fl.PortKind.control
+          ? Colors.white
+          : AppColors.success,
+    );

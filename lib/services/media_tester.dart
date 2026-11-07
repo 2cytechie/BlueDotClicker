@@ -85,7 +85,7 @@ class MediaTester {
   // ---- 各节点测试 ----
 
   Future<MediaTestResult> _testScreenshot(RectPx? region) async {
-    final img = await _capture(region);
+    final (img, _, _) = await _capture(region);
     return MediaTestResult(
       ok: true,
       title: '截图成功',
@@ -98,7 +98,7 @@ class MediaTester {
   }
 
   Future<MediaTestResult> _testOcr(Map<String, Object?> data, RectPx? region) async {
-    final img = await _capture(region);
+    final (img, _, _) = await _capture(region);
     final text = (await _recognition.recognizeText(img)).text;
     final varName = ((data['resultVar'] as String?) ?? '').trim();
     return MediaTestResult(
@@ -126,10 +126,11 @@ class MediaTester {
       return MediaTestResult(ok: false, title: '模板加载失败', lines: ['$e']);
     }
     final threshold = _double(data, 'threshold', 0.8);
-    final img = await _capture(region);
+    final (img, imgX, imgY) = await _capture(region);
     final r = await _recognition.matchTemplate(img, tpl, threshold: threshold);
-    final fullX = (region?.x ?? 0) + r.x;
-    final fullY = (region?.y ?? 0) + r.y;
+    // 图像原点可能为负（副屏在主屏左侧），命中坐标需叠回屏幕坐标
+    final fullX = imgX + r.x;
+    final fullY = imgY + r.y;
     return MediaTestResult(
       ok: r.found,
       title: r.found ? '命中' : '未命中',
@@ -149,9 +150,10 @@ class MediaTester {
 
   // ---- 辅助 ----
 
-  Future<RawImage> _capture(RectPx? region) async {
+  /// 采集图像并返回其左上角的屏幕坐标（区域采集时即区域原点，可为负）
+  Future<(RawImage, int, int)> _capture(RectPx? region) async {
     final cap = await _automation.capture(region: region);
-    return RawImage(cap.width, cap.height, cap.bgra);
+    return (RawImage(cap.width, cap.height, cap.bgra), cap.x, cap.y);
   }
 
   String _regionLabel(RectPx? region) => region == null

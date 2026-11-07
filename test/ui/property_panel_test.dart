@@ -1,4 +1,6 @@
 import 'package:bluedot_clicker/core/theme.dart';
+import 'package:bluedot_clicker/models/blueprint.dart';
+import 'package:bluedot_clicker/state/providers.dart';
 import 'package:bluedot_clicker/ui/editor/node_bridge.dart';
 import 'package:bluedot_clicker/ui/editor/property_panel.dart';
 import 'package:fl_nodes_v2/fl_nodes_v2.dart' as fl;
@@ -21,9 +23,9 @@ void main() {
     controller.dispose();
   });
 
-  Future<void> pumpPanel(WidgetTester tester) async {
+  Future<void> pumpPanel(WidgetTester tester, {ProviderContainer? container}) async {
     await tester.pumpWidget(UncontrolledProviderScope(
-      container: ProviderContainer(),
+      container: container ?? ProviderContainer(),
       child: MaterialApp(
         home: Scaffold(
           body: PropertyPanel(controller: controller),
@@ -105,13 +107,14 @@ void main() {
     });
   });
 
-  group('鼠标节点排版与内联拾取', () {
-    testWidgets('旧版独立「屏幕坐标拾取」区已删除，拾取入口在坐标行尾', (tester) async {
+  group('鼠标节点排版与坐标操作按钮', () {
+    testWidgets('旧版独立「屏幕坐标拾取」区已删除，坐标上方有拾取/定位两按钮', (tester) async {
       await pumpPanel(tester);
 
       expect(find.text('屏幕坐标拾取'), findsNothing);
       expect(find.byIcon(Icons.my_location_rounded), findsOneWidget);
-      expect(find.byTooltip('拾取坐标'), findsOneWidget);
+      expect(find.text('拾取坐标'), findsOneWidget);
+      expect(find.text('屏幕定位'), findsOneWidget);
     });
 
     testWidgets('字段顺序：动作 → 鼠标键 → X/Y', (tester) async {
@@ -119,12 +122,15 @@ void main() {
 
       final actionY = tester.getTopLeft(find.text('动作')).dy;
       final buttonY = tester.getTopLeft(find.text('鼠标键')).dy;
-      final xY = tester.getTopLeft(find.text('X 坐标')).dy;
+      // 「X 坐标」也是端口说明区的端口名，用 TextField 精确取参数输入框位置
+      final xY = tester
+          .getTopLeft(find.widgetWithText(TextField, 'X 坐标'))
+          .dy;
       expect(actionY, lessThan(buttonY));
       expect(buttonY, lessThan(xY));
     });
 
-    testWidgets('滚轮动作：无鼠标键，坐标行尾仅一个拾取按钮', (tester) async {
+    testWidgets('滚轮动作：无鼠标键，坐标上方仍是一组拾取/定位按钮', (tester) async {
       controller.updateNode(
         'n1',
         (n) => n.withData(const {'action': 'scroll'}),
@@ -134,23 +140,26 @@ void main() {
       expect(find.text('鼠标键'), findsNothing);
       expect(find.text('滚轮水平(120=一格,正=右)'), findsOneWidget);
       expect(find.text('滚轮垂直(120=一格,正=上)'), findsOneWidget);
-      expect(find.byIcon(Icons.my_location_rounded), findsOneWidget);
+      expect(find.text('拾取坐标'), findsOneWidget);
+      expect(find.text('屏幕定位'), findsOneWidget);
     });
 
-    testWidgets('滑动：起点/终点各一个拾取按钮，方向模式只保留起点', (tester) async {
+    testWidgets('滑动：起点/终点各一组按钮，方向模式只保留起点', (tester) async {
       controller.updateNode(
         'n1',
         (n) => n.withData(const {'action': 'swipe'}),
       );
       await pumpPanel(tester);
-      expect(find.byIcon(Icons.my_location_rounded), findsNWidgets(2));
+      expect(find.text('拾取坐标'), findsNWidgets(2));
+      expect(find.text('屏幕定位'), findsNWidgets(2));
 
       controller.updateNode(
         'n1',
         (n) => n.withData(const {'action': 'swipe', 'mode': 'direction'}),
       );
       await tester.pumpAndSettle();
-      expect(find.byIcon(Icons.my_location_rounded), findsOneWidget);
+      expect(find.text('拾取坐标'), findsOneWidget);
+      expect(find.text('屏幕定位'), findsOneWidget);
       expect(find.text('终点X'), findsNothing);
       expect(find.text('方向角(度,0=右,逆时针)'), findsOneWidget);
     });
@@ -242,16 +251,22 @@ void main() {
       controller.selection.selectNode(id);
     }
 
-    testWidgets('坐标拾取按钮与输入框垂直居中', (tester) async {
+    testWidgets('拾取/定位按钮位于坐标输入框上方且各占一半宽度', (tester) async {
       await pumpPanel(tester);
-      final fieldCenter = tester.getCenter(
-        find.widgetWithText(TextField, 'X 坐标'),
-      );
-      final buttonCenter = tester.getCenter(find.byTooltip('拾取坐标'));
+      final pick = tester.getRect(find.byTooltip('拾取坐标'));
+      final locate = tester.getRect(find.byTooltip('在屏幕上拖动图标设置坐标'));
+      final field = tester.getRect(find.widgetWithText(TextField, 'X 坐标'));
+      expect(pick.top, locate.top, reason: '两个按钮同一行');
       expect(
-        (fieldCenter.dy - buttonCenter.dy).abs(),
-        lessThan(6),
-        reason: '按钮图标中心应与输入框中心对齐（计划第 1 项）',
+        (pick.width - locate.width).abs(),
+        lessThan(0.5),
+        reason: '两个按钮各占一半宽度',
+      );
+      expect(pick.right, lessThan(locate.left), reason: '拾取在左，定位在右');
+      expect(
+        pick.bottom,
+        lessThanOrEqualTo(field.top),
+        reason: '按钮行应位于坐标输入框上方',
       );
     });
 
@@ -264,15 +279,6 @@ void main() {
       expect(dy('左值变量名(可空)'), lessThan(dy('右值变量名(可空)')));
     });
 
-    testWidgets('数据存取：存储键与关联变量名并排', (tester) async {
-      addAndSelect('storage', 'st1');
-      await pumpPanel(tester);
-      expect(
-        tester.getTopLeft(find.text('存储键')).dy,
-        tester.getTopLeft(find.text('关联变量名')).dy,
-      );
-    });
-
     testWidgets('设置变量：变量名与常量并排', (tester) async {
       addAndSelect('setVar', 'sv1');
       await pumpPanel(tester);
@@ -283,20 +289,6 @@ void main() {
       expect(
         tester.getTopLeft(find.byWidget(byLabel('变量名'))).dy,
         tester.getTopLeft(find.byWidget(byLabel('常量值(无连接时)'))).dy,
-      );
-    });
-
-    testWidgets('图像识别：命中X/命中Y 变量并排', (tester) async {
-      addAndSelect('imageMatch', 'im1');
-      await pumpPanel(tester);
-      await tester.scrollUntilVisible(
-        find.text('命中Y存入变量'),
-        200,
-        scrollable: find.byType(Scrollable).first,
-      );
-      expect(
-        tester.getTopLeft(find.text('命中X存入变量')).dy,
-        tester.getTopLeft(find.text('命中Y存入变量')).dy,
       );
     });
 
@@ -321,6 +313,226 @@ void main() {
       await pumpPanel(tester);
       expect(find.byIcon(Icons.crop_free_rounded), findsOneWidget);
       expect(find.byIcon(Icons.my_location_rounded), findsNothing);
+    });
+  });
+
+  group('坐标数据输入锁定', () {
+    var srcIndex = 0;
+
+    /// 用 setVar 作为数据源，把 valueOut 接到 mouse 节点的指定输入端口
+    void connectSource(String port) {
+      final id = 'src${srcIndex++}';
+      controller.addNode(
+        blueprintNodeRegistry.instantiate(
+          'setVar',
+          id: id,
+          position: const Offset(0, 300),
+        ),
+      );
+      controller.connect(
+        fl.PortRef(id, 'valueOut'),
+        fl.PortRef('n1', port),
+      );
+    }
+
+    testWidgets('X 输入已连接：X 坐标禁用并加锁图标，Y 坐标不受影响', (tester) async {
+      connectSource('x');
+      await pumpPanel(tester);
+
+      expect(find.text('X 坐标（锁定）'), findsOneWidget);
+      expect(
+        find.widgetWithText(TextField, 'Y 坐标'),
+        findsOneWidget,
+        reason: 'Y 未连接不应锁定（端口说明区的端口名不算）',
+      );
+      expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
+
+      final xField = tester.widget<TextField>(
+        find.widgetWithText(TextField, 'X 坐标（锁定）'),
+      );
+      expect(xField.enabled, isFalse);
+      final yField = tester.widget<TextField>(
+        find.widgetWithText(TextField, 'Y 坐标'),
+      );
+      expect(yField.enabled, isNot(isFalse), reason: 'Y 未连接应保持可编辑');
+    });
+
+    testWidgets('X/Y 均连接：两个坐标都锁定，拾取与屏幕定位按钮隐藏', (tester) async {
+      connectSource('x');
+      connectSource('y');
+      await pumpPanel(tester);
+
+      expect(find.byIcon(Icons.lock_outline_rounded), findsNWidgets(2));
+      expect(find.text('拾取坐标'), findsNothing);
+      expect(find.text('屏幕定位'), findsNothing);
+    });
+
+    testWidgets('未连接任何输入时坐标可编辑且拾取按钮可见', (tester) async {
+      await pumpPanel(tester);
+
+      expect(find.byIcon(Icons.lock_outline_rounded), findsNothing);
+      expect(find.text('拾取坐标'), findsOneWidget);
+      final xField = tester.widget<TextField>(
+        find.widgetWithText(TextField, 'X 坐标'),
+      );
+      expect(xField.enabled, isNot(isFalse));
+    });
+
+    testWidgets('锁定与可编辑输入框等高，锁定态数值显示为 0', (tester) async {
+      controller.updateNode(
+        'n1',
+        (n) => n.withData(const {'x': -809, 'y': 428}),
+      );
+      connectSource('x');
+      await pumpPanel(tester);
+
+      final locked = tester.getRect(
+        find.widgetWithText(TextField, 'X 坐标（锁定）'),
+      );
+      final editable = tester.getRect(find.widgetWithText(TextField, 'Y 坐标'));
+      expect(
+        locked.height,
+        editable.height,
+        reason: '锁定不应把输入框撑高（suffixIcon 默认 48×48 约束所致）',
+      );
+      expect(find.text('0'), findsOneWidget, reason: '锁定的坐标参数应显示 0');
+      expect(find.text('-809'), findsNothing);
+    });
+
+    testWidgets('解除连接后锁定值恢复为参数原值', (tester) async {
+      controller.updateNode(
+        'n1',
+        (n) => n.withData(const {'x': -809, 'y': 428}),
+      );
+      connectSource('x');
+      await pumpPanel(tester);
+      expect(find.text('0'), findsOneWidget);
+
+      controller.removeConnections(
+        controller.graph.connectionsOf('n1').map((c) => c.id).toList(),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('-809'), findsOneWidget, reason: '解锁后显示回参数真实值');
+      expect(
+        find.widgetWithText(TextField, 'X 坐标'),
+        findsOneWidget,
+        reason: '解锁后标签不再带「（锁定）」',
+      );
+    });
+  });
+
+  group('第四轮：varName 下拉与模板图片整行', () {
+    testWidgets('获取变量：变量名字段带已有变量下拉，选择后写入参数', (tester) async {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      // 下拉来源一：脚本初始变量表（变量面板已初始化的变量）
+      final script = BlueprintScript(name: 't')..variables['hp'] = 100;
+      container.read(currentScriptProvider.notifier).open(script);
+      // 下拉来源二：图中 varName 参数引用的变量
+      controller.addNode(
+        blueprintNodeRegistry.instantiate('setVar', id: 'sv', position: Offset.zero),
+      );
+      controller.updateNode('sv', (n) => n.withData({'name': 'score'}));
+      controller.addNode(
+        blueprintNodeRegistry.instantiate('getVar', id: 'g1', position: Offset.zero),
+      );
+      controller.selection.selectNode('g1');
+      await pumpPanel(tester, container: container);
+
+      final arrow = find.byIcon(Icons.arrow_drop_down_rounded);
+      expect(arrow, findsOneWidget, reason: 'varName 字段尾部应有下拉箭头');
+      await tester.tap(arrow);
+      await tester.pumpAndSettle();
+      expect(find.text('hp'), findsOneWidget);
+      expect(find.text('score'), findsOneWidget);
+      await tester.tap(find.text('hp'));
+      await tester.pumpAndSettle();
+
+      expect(controller.graph.nodes['g1']!.data['name'], 'hp');
+      expect(find.widgetWithText(TextField, 'hp'), findsOneWidget,
+          reason: '选择后输入框同步显示所选变量名');
+    });
+
+    testWidgets('数据保存：文件名字段带扩展名提示', (tester) async {
+      controller.addNode(
+        blueprintNodeRegistry.instantiate('saveData', id: 'sd', position: Offset.zero),
+      );
+      controller.selection.selectNode('sd');
+      await pumpPanel(tester);
+
+      final field = find.widgetWithText(TextField, '保存文件名');
+      expect(field, findsOneWidget);
+      expect(find.text('不含扩展名'), findsOneWidget);
+    });
+
+    testWidgets('图像识别：选择图片整行显示文件名（文件不存在不显示预览）', (tester) async {
+      controller.addNode(
+        blueprintNodeRegistry.instantiate('imageMatch', id: 'im1', position: Offset.zero),
+      );
+      controller.selection.selectNode('im1');
+      controller.updateNode('im1', (n) => n.withData({'templatePath': 'C:/pics/target.png'}));
+      await pumpPanel(tester);
+
+      final btn = find.widgetWithText(OutlinedButton, 'target.png');
+      expect(btn, findsOneWidget);
+      final rect = tester.getRect(btn);
+      // 测试视口默认 800 宽，整宽按钮应接近视口全宽（减去面板 padding 28）
+      expect(rect.width, greaterThan(750), reason: '选择图片应整宽独占一行');
+      // 文件不存在（C:/pics/target.png）：不显示预览
+      expect(find.byType(Image), findsNothing);
+    });
+  });
+
+  group('第五轮：识别文本输入锁定与文件名截断', () {
+    testWidgets('文字识别：「识别文本」参数无变量下拉，连接输入后锁定', (tester) async {
+      controller.addNode(
+        blueprintNodeRegistry.instantiate('ocr', id: 'o1', position: Offset.zero),
+      );
+      controller.selection.selectNode('o1');
+      // 未连接：参数可编辑、无下拉箭头（string 类型无已有变量建议）
+      await pumpPanel(tester);
+      final field = find.widgetWithText(TextField, '识别文本');
+      expect(field, findsOneWidget);
+      expect(
+        tester.widget<TextField>(field).decoration?.suffixIcon,
+        isNull,
+        reason: '识别文本为 string 字段，不应有已有变量下拉',
+      );
+
+      // 连接上游数据 → 参数锁定只读
+      controller.addNode(
+        blueprintNodeRegistry.instantiate('setVar', id: 'src', position: const Offset(0, 300)),
+      );
+      final connId = controller.connect(
+        fl.PortRef('src', 'valueOut'),
+        fl.PortRef('o1', 'resultVar'),
+      );
+      expect(connId, isNotNull, reason: '诊断：连接应建立');
+      await tester.pumpAndSettle();
+
+      expect(find.text('识别文本（锁定）'), findsOneWidget);
+      final locked = tester.widget<TextField>(
+        find.widgetWithText(TextField, '识别文本（锁定）'),
+      );
+      expect(locked.enabled, isFalse);
+      expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
+    });
+
+    testWidgets('图像识别：超长文件名中段截断并保留扩展名，Tooltip 显示完整路径', (tester) async {
+      controller.addNode(
+        blueprintNodeRegistry.instantiate('imageMatch', id: 'im1', position: Offset.zero),
+      );
+      controller.selection.selectNode('im1');
+      const longName = '屏幕截图_2026年11月08日_100021_windows.png';
+      controller.updateNode('im1', (n) => n.withData({'templatePath': 'C:/pics/$longName'}));
+      await pumpPanel(tester);
+
+      // 按钮文本保留头部 + 省略号 + 扩展名（而不是「屏幕…」丢掉类型信息）
+      expect(find.text('屏幕截图_2026年….png'), findsOneWidget,
+          reason: '长文件名应中段截断并保留 .png 扩展名');
+      // 悬浮提示显示完整路径
+      expect(find.byTooltip('C:/pics/$longName'), findsOneWidget);
     });
   });
 }

@@ -24,7 +24,13 @@ class FakeAutomation implements PlatformAutomation {
     lastRegion = region;
     final w = region?.w ?? 200;
     final h = region?.h ?? 150;
-    return ScreenCapture(w, h, Uint8List(w * h * 4));
+    return ScreenCapture(
+      w,
+      h,
+      Uint8List(w * h * 4),
+      x: region?.x ?? 0,
+      y: region?.y ?? 0,
+    );
   }
 
   @override
@@ -136,6 +142,22 @@ void main() {
       expect(r.preview!.height, 40);
       // 全屏坐标 = 区域偏移 (10,10) + 匹配坐标 (20,30)
       expect(r.lines.join(), contains('(30, 40)'));
+    });
+
+    test('负坐标区域：命中坐标叠加负的图像原点', () async {
+      final auto = FakeAutomation();
+      final r = await _tester(automation: auto).runTest('imageMatch', const {
+        'templatePath': 'C:/tpl.png',
+        'useRegion': true,
+        'rx': -500,
+        'ry': 100,
+        'rw': 50,
+        'rh': 40,
+      });
+      expect(auto.lastRegion!.x, -500);
+      expect(r.preview!.width, 50);
+      // 全屏坐标 = (-500,100) + (20,30)；副屏在主屏左侧时命中 X 为负
+      expect(r.lines.join(), contains('(-480, 130)'));
     });
 
     test('非媒体节点类型给出不支持提示', () async {

@@ -200,8 +200,21 @@ final List<NodeTypeDef> kNodeTypes = [
     title: '鼠标操作',
     category: NodeCategory.interaction,
     icon: Icons.mouse_rounded,
-    description: '按所选动作操作鼠标：单击/双击/滑动/长按/滚轮/移动到。',
-    inputs: [_inExec()],
+    description: '按所选动作操作鼠标：单击/双击/滑动/长按/滚轮/移动到。'
+        'X/Y 坐标可选接入上游数据（如识别结果），接入后坐标参数自动锁定。',
+    inputs: [
+      _inExec(),
+      _inData(
+        'x',
+        'X 坐标',
+        note: '可选。连接上游数据后，本节点的 X 坐标由输入值决定，属性面板中的「X 坐标」参数锁定为只读；不连接时使用参数值。',
+      ),
+      _inData(
+        'y',
+        'Y 坐标',
+        note: '可选。连接上游数据后，本节点的 Y 坐标由输入值决定，属性面板中的「Y 坐标」参数锁定为只读；不连接时使用参数值。',
+      ),
+    ],
     outputs: [_outExec()],
     params: [
       ParamFieldDef(
@@ -431,7 +444,8 @@ final List<NodeTypeDef> kNodeTypes = [
     title: '文字识别',
     category: NodeCategory.media,
     icon: Icons.text_fields_rounded,
-    description: '对图像/屏幕区域进行 OCR，文本写入变量',
+    description: '对图像/屏幕区域进行文字识别（OCR），识别出的完整文本从「文本」输出端口连线给下游，'
+        '也可写入「识别文本」指定的变量（留空则不存；变量名可手写或由输入连接提供）；坐标输出为识别区域中心点',
     inputs: [
       _inExec(),
       _inData(
@@ -441,20 +455,29 @@ final List<NodeTypeDef> kNodeTypes = [
             '可选数据输入。连接上游「截图」节点的「图像」输出时，直接识别该图像、不再重新截屏；不连接时自动现场截屏（或截取上方设定的区域）。'
             '注意：在编辑器里点「测试识别」取不到上游图像，会现场截屏。',
       ),
+      _inData(
+        'resultVar',
+        '识别文本',
+        note:
+            '可选。连接上游文本时，识别文本写入该文本指定的变量名，属性面板中的「识别文本」参数锁定为只读；不连接时使用参数手写的变量名。',
+      ),
     ],
     outputs: [
       _outExec(),
       _outData('text', '文本', note: '识别出的完整文本（字符串），可连接下游节点的数据输入'),
-      _outData('x', '区域X', note: '识别区域左上角在屏幕上的 X 坐标（未指定区域时为 0）'),
-      _outData('y', '区域Y', note: '识别区域左上角在屏幕上的 Y 坐标（未指定区域时为 0）'),
+      _outData('found', '是否命中',
+          note: '是否识别到文本（识别结果非空为 true），可连接「条件判断」节点的数据输入'),
+      _outData('x', '坐标X', note: '识别区域中心点的 X 坐标（区域坐标X + 区域宽 ÷ 2；未框选区域时为屏幕中心）'),
+      _outData('y', '坐标Y', note: '识别区域中心点的 Y 坐标（区域坐标Y + 区域高 ÷ 2；未框选区域时为屏幕中心）'),
     ],
     params: [
       ..._regionFields,
       ParamFieldDef(
         'resultVar',
-        '文本存入变量',
-        ParamType.varName,
+        '识别文本',
+        ParamType.string,
         defaultValue: 'ocrText',
+        hint: '识别结果存入的变量名（留空则不存）',
       ),
     ],
   ),
@@ -463,7 +486,8 @@ final List<NodeTypeDef> kNodeTypes = [
     title: '图像识别',
     category: NodeCategory.media,
     icon: Icons.image_search_rounded,
-    description: '在屏幕/图像中匹配模板图（游戏UI元素），命中结果写入变量',
+    description: '在屏幕/图像中匹配模板图（游戏UI元素），命中结果'
+        '（是否命中/坐标X/坐标Y/相似度）从输出端口连线给下游节点使用',
     inputs: [
       _inExec(),
       _inData(
@@ -476,9 +500,9 @@ final List<NodeTypeDef> kNodeTypes = [
       _outExec(),
       _outData('found', '是否命中',
           note: '是否命中（true/false），可连接「条件判断」节点的数据输入'),
-      _outData('x', '命中X',
+      _outData('x', '坐标X',
           note: '命中区域中心在屏幕上的 X 坐标（未命中时为最佳匹配位置；区域模式时含区域偏移）'),
-      _outData('y', '命中Y',
+      _outData('y', '坐标Y',
           note: '命中区域中心在屏幕上的 Y 坐标（未命中时为最佳匹配位置；区域模式时含区域偏移）'),
       _outData('score', '相似度', note: '相似度得分（0.0~1.0，越接近 1 越相似）'),
     ],
@@ -491,24 +515,6 @@ final List<NodeTypeDef> kNodeTypes = [
       ),
       ParamFieldDef('threshold', '相似度阈值', ParamType.double, defaultValue: 0.8),
       ..._regionFields,
-      ParamFieldDef(
-        'foundVar',
-        '命中标志存入变量',
-        ParamType.varName,
-        defaultValue: 'found',
-      ),
-      ParamFieldDef(
-        'posXVar',
-        '命中X存入变量',
-        ParamType.varName,
-        defaultValue: 'matchX',
-      ),
-      ParamFieldDef(
-        'posYVar',
-        '命中Y存入变量',
-        ParamType.varName,
-        defaultValue: 'matchY',
-      ),
     ],
   ),
   NodeTypeDef(
@@ -603,23 +609,48 @@ final List<NodeTypeDef> kNodeTypes = [
     ],
   ),
   NodeTypeDef(
-    type: 'storage',
-    title: '数据存取',
+    type: 'getVar',
+    title: '获取变量',
     category: NodeCategory.data,
-    icon: Icons.save_outlined,
-    description: '将变量持久化保存到磁盘，或从磁盘读取（键值对 JSON 数据文件）',
-    inputs: [_inExec(), _inData('value', '保存值')],
-    outputs: [_outExec(), _outData('valueOut', '读取值')],
+    icon: Icons.data_object_rounded,
+    description: '读取已设置变量的当前值并从「值」端口输出，可连接任意数据输入；'
+        '变量名可在属性面板下拉选择（或从节点库「变量」分类点击变量创建）',
+    // 数据端口只有输出（用户要求）；执行流端口保留以接入链路
+    inputs: [_inExec()],
+    outputs: [
+      _outExec(),
+      _outData('value', '值',
+          note: '所选变量当前的值（数字/字符串/布尔），可连接任意数据输入端口'),
+    ],
     params: [
-      ParamFieldDef(
-        'action',
-        '操作',
-        ParamType.enum_,
-        defaultValue: 'save',
-        options: [EnumOption('save', '保存'), EnumOption('load', '读取')],
-      ),
-      ParamFieldDef('key', '存储键', ParamType.string, defaultValue: 'myKey'),
-      ParamFieldDef('name', '关联变量名', ParamType.varName, defaultValue: 'myVar'),
+      ParamFieldDef('name', '变量名', ParamType.varName, defaultValue: ''),
+    ],
+  ),
+  NodeTypeDef(
+    type: 'saveData',
+    title: '数据保存',
+    category: NodeCategory.data,
+    icon: Icons.save_as_outlined,
+    description: '把上游数据保存为文件：文本存为 .txt，图像存为 .png，'
+        '保存到「我的文档\\bluedot_clicker\\save\\」文件夹下，同名文件自动加序号；'
+        '保存的数据从「文本」「图像」输出端口继续输出，可连线给下游使用（运行日志中也会显示保存路径）',
+    inputs: [
+      _inExec(),
+      _inData('text', '文本',
+          note: '可选。连接文本类输出（如「文字识别」的「文本」），保存为 .txt 文件'),
+      _inData('image', '图像',
+          note: '可选。连接「截图」节点的「图像」输出，保存为 .png 图片'),
+    ],
+    outputs: [
+      _outExec(),
+      _outData('textOut', '文本',
+          note: '透传所连接的「文本」输入数据，保存后可继续连线给下游节点'),
+      _outData('imageOut', '图像',
+          note: '透传所连接的「图像」输入数据，保存后可继续连线给下游节点'),
+    ],
+    params: [
+      ParamFieldDef('fileName', '保存文件名', ParamType.string,
+          defaultValue: 'result', hint: '不含扩展名'),
     ],
   ),
 ];

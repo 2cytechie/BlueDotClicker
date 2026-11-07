@@ -1,4 +1,5 @@
 import 'package:fl_nodes_v2/fl_nodes_v2.dart' as fl;
+import 'package:flutter/foundation.dart' show mapEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,10 +31,13 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   final GlobalKey<fl.NodeEditorState> _editorKey = GlobalKey();
   BlueprintScript? _loadedScript;
   bool _showLogs = false;
+  /// 变量初始值面板有修改（graph 之外的脏状态，project.isDirty 覆盖不到）
+  bool _varsDirty = false;
   // dispose 中禁止使用 ref（Riverpod 3 抛 StateError）——didChangeDependencies 捕获
   CoordinatePickNotifier? _pickNotifier;
   KeyPickNotifier? _keyPickNotifier;
   RegionPickNotifier? _regionPickNotifier;
+  ScreenLocateNotifier? _locateNotifier;
 
   @override
   void initState() {
@@ -44,8 +48,12 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     // Ctrl+S 保存：编辑界面挂载期间监听（不依赖具体控件的焦点）
     HardwareKeyboard.instance.addHandler(_onKeyEvent);
     // 打开脚本 → 载入图（不同实例才载入，避免编辑引起的刷新重置画布）
+    // 变量面板（scriptVariablesProvider）自行 watch currentScriptProvider 同步
     ref.listenManual(currentScriptProvider, (prev, next) {
-      if (next == null) return;
+      if (next == null) {
+        _varsDirty = false;
+        return;
+      }
       if (identical(next, _loadedScript)) return;
       _loadedScript = next;
       _controller.replaceGraph(
@@ -56,6 +64,12 @@ class _EditorPageState extends ConsumerState<EditorPage> {
       // 刚载入的内容与磁盘一致：登记为干净基线，避免脏标记常亮
       _controller.project.markSaved();
       WidgetsBinding.instance.addPostFrameCallback((_) => _fitContent());
+    });
+    // 变量面板修改（初始值/新建）→ 与当前脚本不一致时标记脏
+    ref.listenManual(scriptVariablesProvider, (_, next) {
+      final cur = ref.read(currentScriptProvider);
+      if (cur == null || mapEquals(next, cur.variables)) return;
+      setState(() => _varsDirty = true);
     });
     final initial = ref.read(currentScriptProvider);
     if (initial != null) {
@@ -72,6 +86,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     _pickNotifier ??= ref.read(coordinatePickProvider.notifier);
     _keyPickNotifier ??= ref.read(keyPickProvider.notifier);
     _regionPickNotifier ??= ref.read(regionPickProvider.notifier);
+    _locateNotifier ??= ref.read(screenLocateProvider.notifier);
   }
 
   @override
@@ -82,6 +97,8 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     _pickNotifier?.cancel();
     _keyPickNotifier?.cancel();
     _regionPickNotifier?.cancel();
+    // 屏幕定位的分层窗口与鼠标钩子同样必须收起，否则离开编辑器后图标残留在屏幕上
+    _locateNotifier?.stop();
     _controller.dispose();
     super.dispose();
   }
@@ -102,7 +119,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     }
   }
 
-  /// 从编辑器图模型转回脚本（所见即所得；variables 由脚本承载，graph 不含）
+  /// 从编辑器图模型转回脚本（所见即所得；变量面板为 variables 的权威来源）
   BlueprintScript? _currentAsScript() {
     final loaded = _loadedScript;
     if (loaded == null) return null;
@@ -110,7 +127,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
       _controller.graph,
       name: loaded.name,
       createdAt: loaded.createdAt,
-      variables: Map.of(loaded.variables),
+      variables: Map.of(ref.read(scriptVariablesProvider)),
     );
   }
 
@@ -130,6 +147,10 @@ class _EditorPageState extends ConsumerState<EditorPage> {
       if (identical(_controller.graph, graphAtSave)) {
         _controller.project.markSaved();
       }
+      // 变量初始值已随本次保存落盘
+      if (mapEquals(ref.read(scriptVariablesProvider), script.variables)) {
+        if (mounted) setState(() => _varsDirty = false);
+      }
       // 刷新首页列表：列表缓存的是打开时的旧对象，不刷新会导致再次编辑载入旧内容
       await ref.read(scriptListProvider.notifier).refresh();
       if (mounted) {
@@ -148,8 +169,9 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     }
   }
 
-  /// 是否有未保存的修改
-  bool get _isDirty => _loadedScript != null && _controller.project.isDirty;
+  /// 是否有未保存的修改（画布或变量面板任一有变化）
+  bool get _isDirty =>
+      _loadedScript != null && (_controller.project.isDirty || _varsDirty);
 
   /// 返回首页：有未保存修改时先询问是否保存
   Future<void> _leaveEditor() async {
@@ -187,6 +209,8 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   void _run() {
     final script = _currentAsScript();
     if (script == null) return;
+    // 运行前收起定位图标：避免图标挡住实际点击位置
+    _locateNotifier?.stop();
     ref.read(runnerProvider.notifier).start(script);
   }
 
@@ -208,8 +232,8 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     );
   }
 
-  void _showPropsSheet() {
-    showModalBottomSheet<void>(
+  Future<void> _showPropsSheet() async {
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: AppColors.ivory,
@@ -221,6 +245,8 @@ class _EditorPageState extends ConsumerState<EditorPage> {
       ),
       builder: (_) => PropertyPanel(controller: _controller),
     );
+    // 属性面板关闭后没有入口再关闭定位，直接收起屏幕图标
+    if (mounted) ref.read(screenLocateProvider.notifier).stop();
   }
 
   /// 画布上的拾取状态悬浮条：拾取进行中实时显示光标坐标与操作提示。
@@ -230,6 +256,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
       child,
       const Positioned(top: 12, left: 0, right: 0, child: _PickBanner()),
       const Positioned(top: 12, left: 0, right: 0, child: _KeyPickBanner()),
+      const Positioned(top: 12, left: 0, right: 0, child: _LocateBanner()),
     ],
   );
 
@@ -294,6 +321,12 @@ class _EditorPageState extends ConsumerState<EditorPage> {
                         ).copyWith(background: AppColors.canvasBg),
                         contextMenus: buildEditorContextMenus(),
                         onConnectionTap: _confirmDeleteConnection,
+                        // 连线常态配色：执行流白色、数据绿色
+                        connectionAppearance:
+                            (c, from, to) => connectionAppearanceFor(from),
+                        // 坐标等参数被数据输入接管后归零，避免保留旧的手填坐标
+                        onConnectionCreated: (c) =>
+                            zeroParamOverriddenByInput(_controller, c),
                       );
                       if (constraints.maxWidth >= 1100) {
                         return Row(
@@ -397,10 +430,11 @@ class _EditorPageState extends ConsumerState<EditorPage> {
               ),
             ),
           ),
-          // 未保存提示（跟随图变化实时刷新）
+          // 未保存提示（跟随图/变量面板变化实时刷新）
           ListenableBuilder(
             listenable: _controller,
-            builder: (context, _) => _controller.project.isDirty
+            builder: (context, _) =>
+                _controller.project.isDirty || _varsDirty
                 ? const Padding(
                     padding: EdgeInsets.only(right: 8),
                     child: Row(
@@ -573,6 +607,54 @@ class _PickBanner extends ConsumerWidget {
                   ' · 按键随点击记录',
                   style: TextStyle(fontSize: 12, color: AppColors.peacock),
                 ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 屏幕定位悬浮条：提示拖动屏幕上的图标改坐标、再次点击按钮关闭
+class _LocateBanner extends ConsumerWidget {
+  const _LocateBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final locate = ref.watch(screenLocateProvider);
+    if (!locate.active) return const SizedBox.shrink();
+    return IgnorePointer(
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppColors.ink.withValues(alpha: 0.88),
+            borderRadius: BorderRadius.circular(999),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x33000000),
+                blurRadius: 8,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.location_on_rounded,
+                size: 15,
+                color: AppColors.success,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${locate.target!.label} · 屏幕定位中 · 拖动屏幕上的图标改坐标'
+                ' · 再点「屏幕定位」关闭',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.moonWhite,
+                ),
+              ),
             ],
           ),
         ),

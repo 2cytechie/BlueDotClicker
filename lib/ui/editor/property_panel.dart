@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -12,6 +13,7 @@ import '../../models/key_names.dart';
 import '../../models/node_types.dart';
 import '../../services/media_tester.dart';
 import '../../state/providers.dart';
+import 'node_bridge.dart' show graphVarNames;
 
 /// 属性面板：编辑当前选中节点的参数（数据存储于 GraphNode.data，
 /// 经 NodeEditorController.updateNode 提交，支持撤销/重做）
@@ -57,25 +59,68 @@ class PropertyPanel extends ConsumerWidget {
     return data;
   }
 
-  /// 各节点的拾取目标：(按钮标签, keyX, keyY, 按键参数键或 null)
-  List<(String, String, String, String?)> _pickTargets(
-    String type,
+  /// 各行坐标对应的操作：拾取坐标（点坐标）/ 屏幕定位（拖动图标改坐标）。
+  /// 键为坐标对的 X 参数键（'x' / 'startX' / 'endX'）。
+  Map<String, _CoordActions> _coordActions(
+    fl.GraphNode node,
     Map<String, Object?> data,
-  ) => switch (type) {
-    'mouse' => switch ('${data['action']}') {
-      'click' ||
-      'doubleClick' ||
-      'longPress' => [('拾取坐标', 'x', 'y', 'button')],
-      // 滚轮/移动只需要位置
-      'scroll' || 'move' => [('拾取坐标', 'x', 'y', null)],
-      'swipe' => [
-        ('拾取起点', 'startX', 'startY', null),
-        if (data['mode'] != 'direction') ('拾取终点', 'endX', 'endY', null),
-      ],
-      _ => const [],
-    },
-    _ => const [],
-  };
+  ) {
+    if (node.type != 'mouse') return const {};
+    final action = '${data['action'] ?? 'click'}';
+    if (action == 'swipe') {
+      // 方向距离模式只显示起点；起点终点模式两端可定位并自动连线
+      final withEnd = data['mode'] != 'direction';
+      final locate = ScreenLocateTarget(
+        nodeId: node.id,
+        label: '滑动起点',
+        points: [
+          LocatePointDef('startX', 'startY', AppColors.peacock.toARGB32()),
+          if (withEnd)
+            LocatePointDef('endX', 'endY', AppColors.nodeMedia.toARGB32()),
+        ],
+      );
+      return {
+        'startX': _CoordActions(
+          pick: PickTarget(
+            nodeId: node.id,
+            keyX: 'startX',
+            keyY: 'startY',
+            label: '拾取起点坐标',
+          ),
+          locate: locate,
+        ),
+        if (withEnd)
+          'endX': _CoordActions(
+            pick: PickTarget(
+              nodeId: node.id,
+              keyX: 'endX',
+              keyY: 'endY',
+              label: '拾取终点坐标',
+            ),
+            locate: locate,
+          ),
+      };
+    }
+    // 单击/双击/长按点击哪个鼠标键就记录为「鼠标键」；滚轮/移动只需位置
+    final withButton =
+        action == 'click' || action == 'doubleClick' || action == 'longPress';
+    return {
+      'x': _CoordActions(
+        pick: PickTarget(
+          nodeId: node.id,
+          keyX: 'x',
+          keyY: 'y',
+          buttonKey: withButton ? 'button' : null,
+          label: '拾取坐标',
+        ),
+        locate: ScreenLocateTarget(
+          nodeId: node.id,
+          label: '位置',
+          points: [LocatePointDef('x', 'y', AppColors.peacock.toARGB32())],
+        ),
+      ),
+    };
+  }
 
   /// 左右并排渲染的参数对（其余字段维持上下排列）
   static const List<(String, String)> _kCoordPairs = [
@@ -89,31 +134,38 @@ class PropertyPanel extends ConsumerWidget {
     // 条件判断：左值/右值各自的 变量名+常量 一行
     ('leftVar', 'leftConst'),
     ('rightVar', 'rightConst'),
-    // 数据存取：存储键+变量名；设置变量：变量名+常量
-    ('key', 'name'),
+    // 设置变量：变量名+常量
     ('name', 'const'),
-    // 图像识别：命中X/命中Y 存入变量
-    ('posXVar', 'posYVar'),
   ];
 
+  /// 节点的某个输入端口是否已有连线（连接后对应参数锁定为只读，执行时以输入值为准）
+  bool _hasDataInput(fl.GraphNode node, String port) => controller.graph
+      .connectionsOf(node.id)
+      .any((c) => c.to.nodeId == node.id && c.to.portId == port);
+
+  /// varName 字段的已有变量候选（变量面板已初始化的 + 图中 varName 参数引用的），排序
+  List<String> _varNameSuggestions(WidgetRef ref) =>
+      ({...ref.watch(scriptVariablesProvider).keys, ...graphVarNames(controller.graph)})
+          .toList()
+        ..sort();
+
   /// 参数列表：先按节点当前取值过滤掉不适用的字段（如非滑动动作不显示起终点），
-  /// 再让参数对左右并排（各占一半宽），坐标行命中拾取目标的行尾渲染内联拾取按钮、
-  /// 媒体节点的区域X/Y 行尾渲染框选按钮，其余字段一字段一行。
+  /// 再让参数对左右并排（各占一半宽）。坐标对上方渲染「拾取坐标 + 屏幕定位」
+  /// 两个半宽按钮；媒体节点的区域X/Y 行尾渲染框选按钮，其余字段一字段一行。
   List<Widget> _buildParamFields(WidgetRef ref, fl.GraphNode node) {
     final data = _effectiveData(node);
     final def = nodeDef(node.type);
     final params = def.params.where((f) => f.visibleFor(data)).toList();
-    // 拾取目标按 keyX 索引：'x'/'startX'/'endX' 分别对应一行坐标对
-    final pickByKeyX = {
-      for (final (label, keyX, keyY, buttonKey)
-          in _pickTargets(node.type, data))
-        keyX: PickTarget(
-          nodeId: node.id,
-          keyX: keyX,
-          keyY: keyY,
-          buttonKey: buttonKey,
-          label: label,
-        ),
+    // 坐标操作按 keyX 索引：'x'/'startX'/'endX' 分别对应一行坐标对
+    final actionsByKeyX = _coordActions(node, data);
+    // 数据输入已连接且存在同名参数 → 参数锁定只读（拾取/定位会写参数，一并隐藏避免误导）。
+    // 泛化规则：适用于鼠标 X/Y、文字识别「识别文本」等所有「参数可由输入接管」的节点
+    final lockedKeys = <String>{
+      for (final p in def.inputs)
+        if (p.kind == PortKind.data &&
+            def.params.any((f) => f.key == p.key) &&
+            _hasDataInput(node, p.key))
+          p.key,
     };
     // 媒体节点区域可通过屏幕框选获取：区域X/Y 行尾放框选按钮
     final regionPickable =
@@ -125,23 +177,42 @@ class PropertyPanel extends ConsumerWidget {
       final next = i + 1 < params.length ? params[i + 1] : null;
       if (next != null &&
           _kCoordPairs.any((p) => p.$1 == f.key && p.$2 == next.key)) {
-        final pickTarget = pickByKeyX[f.key];
+        final actions = actionsByKeyX[f.key];
         final regionButton = regionPickable && f.key == 'rx';
+        final pairLocked =
+            lockedKeys.contains(f.key) || lockedKeys.contains(next.key);
+        // 拾取/定位按钮独占一整行，放在坐标输入框上方
+        if (actions != null && !pairLocked) {
+          children.add(
+            _CoordActionBar(
+              controller: controller,
+              node: node,
+              actions: actions,
+            ),
+          );
+        }
         children.add(
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: _buildField(ref, node, f)),
-              const SizedBox(width: 10),
-              Expanded(child: _buildField(ref, node, next)),
-              if (pickTarget != null) ...[
-                const SizedBox(width: 6),
-                _InlinePickButton(
-                  controller: controller,
-                  node: node,
-                  target: pickTarget,
+              Expanded(
+                child: _buildField(
+                  ref,
+                  node,
+                  f,
+                  locked: lockedKeys.contains(f.key),
                 ),
-              ] else if (regionButton) ...[
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildField(
+                  ref,
+                  node,
+                  next,
+                  locked: lockedKeys.contains(next.key),
+                ),
+              ),
+              if (regionButton) ...[
                 const SizedBox(width: 6),
                 _InlineRegionPickButton(controller: controller, node: node),
               ],
@@ -151,7 +222,9 @@ class PropertyPanel extends ConsumerWidget {
         i += 2;
         continue;
       }
-      children.add(_buildField(ref, node, f));
+      children.add(
+        _buildField(ref, node, f, locked: lockedKeys.contains(f.key)),
+      );
       i += 1;
     }
     return children;
@@ -193,10 +266,7 @@ class PropertyPanel extends ConsumerWidget {
                 color: AppColors.ink,
               ),
             ),
-            for (final (title, ports) in [
-              ('输入', inputs),
-              ('输出', outputs),
-            ])
+            for (final (title, ports) in [('输入', inputs), ('输出', outputs)])
               if (ports.isNotEmpty) ...[
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
@@ -229,7 +299,12 @@ class PropertyPanel extends ConsumerWidget {
     );
   }
 
-  Widget _buildField(WidgetRef ref, fl.GraphNode node, ParamFieldDef f) {
+  Widget _buildField(
+    WidgetRef ref,
+    fl.GraphNode node,
+    ParamFieldDef f, {
+    bool locked = false,
+  }) {
     void onCommit(Object v) => _commit(node, f, v);
     switch (f.type) {
       case ParamType.int:
@@ -239,6 +314,7 @@ class PropertyPanel extends ConsumerWidget {
           field: f,
           onCommit: onCommit,
           numberMode: _NumberMode.int,
+          locked: locked,
         );
       case ParamType.double:
         return _ParamTextField(
@@ -247,8 +323,17 @@ class PropertyPanel extends ConsumerWidget {
           field: f,
           onCommit: onCommit,
           numberMode: _NumberMode.double,
+          locked: locked,
         );
       case ParamType.string:
+        return _ParamTextField(
+          controller: controller,
+          node: node,
+          field: f,
+          onCommit: onCommit,
+          numberMode: _NumberMode.none,
+          locked: locked,
+        );
       case ParamType.varName:
         return _ParamTextField(
           controller: controller,
@@ -256,6 +341,9 @@ class PropertyPanel extends ConsumerWidget {
           field: f,
           onCommit: onCommit,
           numberMode: _NumberMode.none,
+          locked: locked,
+          // 已有变量下拉：变量面板已初始化的 + 图中 varName 参数引用的
+          suggestions: _varNameSuggestions(ref),
         );
       case ParamType.bool:
         final v = node.data[f.key];
@@ -531,48 +619,128 @@ class PropertyPanel extends ConsumerWidget {
 
 enum _NumberMode { none, int, double }
 
-/// 坐标行尾的内联拾取按钮：点击进入全局拾取（左/右/中键确认，Esc 取消）。
-/// 单击/双击/长按时点击哪个鼠标键，「鼠标键」参数随确认点击一并记录。
-class _InlinePickButton extends ConsumerWidget {
-  const _InlinePickButton({
+/// 一行坐标可用的操作：拾取（点选屏幕取坐标）与定位（拖动屏幕图标改坐标）
+class _CoordActions {
+  final PickTarget? pick;
+  final ScreenLocateTarget? locate;
+  const _CoordActions({this.pick, this.locate});
+}
+
+/// 坐标输入框上方的操作条：「拾取坐标」「屏幕定位」各占一半宽度。
+/// 定位中再次点击即关闭；定位时拖动屏幕上的图标，拖拽结束回写坐标。
+class _CoordActionBar extends ConsumerWidget {
+  const _CoordActionBar({
     required this.controller,
     required this.node,
-    required this.target,
+    required this.actions,
   });
 
   final fl.NodeEditorController controller;
   final fl.GraphNode node;
-  final PickTarget target;
+  final _CoordActions actions;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final active = ref.watch(
+    final pickTarget = actions.pick;
+    final locateTarget = actions.locate;
+    final pickActive = ref.watch(
       coordinatePickProvider.select(
         (s) =>
             s.active &&
+            pickTarget != null &&
             s.target?.nodeId == node.id &&
-            s.target?.keyX == target.keyX,
+            s.target?.keyX == pickTarget.keyX,
       ),
     );
-    final busy = ref.watch(coordinatePickProvider.select((s) => s.active));
-    // 紧凑按钮（40px）+ 与输入框中心对齐：输入框高约 56px，(56-40)/2 = 8
+    final locateActive = ref.watch(
+      screenLocateProvider.select(
+        (s) =>
+            s.active &&
+            locateTarget != null &&
+            sameScreenLocateTarget(s.target!, locateTarget),
+      ),
+    );
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: IconButton(
-        visualDensity: VisualDensity.compact,
-        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-        tooltip: active ? '拾取中（Esc 取消）' : target.label,
-        onPressed: busy
-            ? null
-            : () => ref.read(coordinatePickProvider.notifier).start(
-                  controller: controller,
-                  target: target,
-                ),
-        icon: Icon(
-          Icons.my_location_rounded,
-          size: 20,
-          color: active ? AppColors.peacock : AppColors.inkSecondary,
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          if (pickTarget != null)
+            Expanded(
+              child: _CoordActionButton(
+                icon: Icons.my_location_rounded,
+                label: '拾取坐标',
+                tooltip: pickActive ? '拾取中（Esc 取消）' : pickTarget.label,
+                active: pickActive,
+                activeColor: AppColors.peacock,
+                onPressed: () => ref
+                    .read(coordinatePickProvider.notifier)
+                    .start(controller: controller, target: pickTarget),
+              ),
+            ),
+          if (pickTarget != null && locateTarget != null)
+            const SizedBox(width: 8),
+          if (locateTarget != null)
+            Expanded(
+              child: _CoordActionButton(
+                icon: locateActive
+                    ? Icons.location_on_rounded
+                    : Icons.location_on_outlined,
+                label: '屏幕定位',
+                tooltip: locateActive
+                    ? '定位中 · 拖动屏幕图标改坐标（再点关闭）'
+                    : '在屏幕上拖动图标设置坐标',
+                active: locateActive,
+                activeColor: AppColors.success,
+                onPressed: () => ref
+                    .read(screenLocateProvider.notifier)
+                    .toggle(controller: controller, target: locateTarget),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 坐标操作按钮（半宽）：图标 + 文字，激活时用操作色填充。
+class _CoordActionButton extends StatelessWidget {
+  const _CoordActionButton({
+    required this.icon,
+    required this.label,
+    required this.tooltip,
+    required this.active,
+    required this.activeColor,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final String tooltip;
+  final bool active;
+  final Color activeColor;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          backgroundColor: active ? activeColor : AppColors.ivory,
+          foregroundColor: active ? Colors.white : AppColors.inkSecondary,
+          side: BorderSide(color: active ? activeColor : AppColors.outline),
+          // 覆盖主题里为整行按钮预留的横向 106 内边距，保证半宽不溢出
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+          minimumSize: const Size(0, 34),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w400),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
         ),
+        icon: Icon(icon, size: 16),
+        label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
   }
@@ -601,17 +769,19 @@ class _InlineRegionPickButton extends ConsumerWidget {
         tooltip: active ? '框选中（Esc 取消）' : '框选区域',
         onPressed: busy
             ? null
-            : () => ref.read(regionPickProvider.notifier).start(
-                  controller: controller,
-                  target: RegionPickTarget(
-                    nodeId: node.id,
-                    keyX: 'rx',
-                    keyY: 'ry',
-                    keyW: 'rw',
-                    keyH: 'rh',
-                    label: '框选区域',
+            : () => ref
+                  .read(regionPickProvider.notifier)
+                  .start(
+                    controller: controller,
+                    target: RegionPickTarget(
+                      nodeId: node.id,
+                      keyX: 'rx',
+                      keyY: 'ry',
+                      keyW: 'rw',
+                      keyH: 'rh',
+                      label: '框选区域',
+                    ),
                   ),
-                ),
         icon: Icon(
           Icons.crop_free_rounded,
           size: 20,
@@ -638,9 +808,7 @@ class _InlineKeyPickButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final active = ref.watch(
-      keyPickProvider.select(
-        (s) => s.active && s.target?.nodeId == node.id,
-      ),
+      keyPickProvider.select((s) => s.active && s.target?.nodeId == node.id),
     );
     final busy = ref.watch(keyPickProvider.select((s) => s.active));
     return Padding(
@@ -651,10 +819,9 @@ class _InlineKeyPickButton extends ConsumerWidget {
         tooltip: active ? '拾取中（Esc 取消）' : target.label,
         onPressed: busy
             ? null
-            : () => ref.read(keyPickProvider.notifier).start(
-                  controller: controller,
-                  target: target,
-                ),
+            : () => ref
+                  .read(keyPickProvider.notifier)
+                  .start(controller: controller, target: target),
         icon: Icon(
           Icons.keyboard_rounded,
           size: 20,
@@ -675,6 +842,8 @@ class _ParamTextField extends StatefulWidget {
     required this.field,
     required this.onCommit,
     required this.numberMode,
+    this.locked = false,
+    this.suggestions,
   });
 
   final fl.NodeEditorController controller;
@@ -682,6 +851,12 @@ class _ParamTextField extends StatefulWidget {
   final ParamFieldDef field;
   final void Function(Object value) onCommit;
   final _NumberMode numberMode;
+
+  /// 已连接数据输入时为 true：输入框禁用（值由上游决定）
+  final bool locked;
+
+  /// varName 字段的已有变量候选（非空时输入框尾部显示下拉箭头）
+  final List<String>? suggestions;
 
   @override
   State<_ParamTextField> createState() => _ParamTextFieldState();
@@ -718,6 +893,8 @@ class _ParamTextFieldState extends State<_ParamTextField> {
   }
 
   String _valueText() {
+    // 锁定（已接入数据输入）时参数不再生效，展示 0 而非残留的手填坐标
+    if (widget.locked) return '0';
     final v = widget.node.data[widget.field.key] ?? widget.field.defaultValue;
     if (v == null) return '';
     if (v is num) {
@@ -737,10 +914,10 @@ class _ParamTextFieldState extends State<_ParamTextField> {
   @override
   void didUpdateWidget(_ParamTextField oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 节点值被外部改写（如拾取写入新坐标）时同步文本；
+    // 节点值被外部改写（如拾取写入新坐标）或锁定状态切换时同步文本；
     // 输入过程中节点值与输入一致，不会打断光标
     final raw = _rawValue;
-    if (!_sameValue(raw, _lastApplied)) {
+    if (oldWidget.locked != widget.locked || !_sameValue(raw, _lastApplied)) {
       _lastApplied = raw;
       final t = _valueText();
       if (_controller.text != t) _controller.text = t;
@@ -784,16 +961,63 @@ class _ParamTextFieldState extends State<_ParamTextField> {
   Widget build(BuildContext context) {
     final f = widget.field;
     final hint = f.hint ?? (f.type == ParamType.varName ? '变量名' : null);
+    final suggestions = widget.suggestions;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
         controller: _controller,
         focusNode: _focus,
+        enabled: !widget.locked,
         keyboardType: widget.numberMode == _NumberMode.none
             ? null
             : TextInputType.number,
         style: const TextStyle(fontSize: 13, color: AppColors.ink),
-        decoration: InputDecoration(labelText: f.label, hintText: hint),
+        decoration: InputDecoration(
+          labelText: widget.locked ? '${f.label}（锁定）' : f.label,
+          hintText: hint,
+          suffixIcon: widget.locked
+              ? const Icon(
+                  Icons.lock_outline_rounded,
+                  size: 16,
+                  color: AppColors.inkSecondary,
+                )
+              // varName 字段：尾部下拉箭头快速选择已有变量（也支持手动输入新变量名）
+              : suggestions != null && suggestions.isNotEmpty
+                  ? PopupMenuButton<String>(
+                      icon: const Icon(
+                        Icons.arrow_drop_down_rounded,
+                        size: 22,
+                        color: AppColors.inkSecondary,
+                      ),
+                      tooltip: '选择已有变量',
+                      position: PopupMenuPosition.under,
+                      onSelected: (v) {
+                        _lastApplied = v;
+                        _controller.text = v;
+                        widget.onCommit(v);
+                      },
+                      itemBuilder: (_) => [
+                        for (final s in suggestions)
+                          PopupMenuItem(
+                            value: s,
+                            child: Text(
+                              s,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: AppColors.ink,
+                              ),
+                            ),
+                          ),
+                      ],
+                    )
+                  : null,
+          // suffixIcon 默认约束为 48×48，会把锁定态输入框撑得更高；
+          // 收到小于文本行高即可，保证锁定前后输入框等高
+          suffixIconConstraints: const BoxConstraints(
+            minWidth: 32,
+            minHeight: 32,
+          ),
+        ),
         onChanged: _onChanged,
       ),
     );
@@ -1067,55 +1291,86 @@ class _TemplateFileField extends StatelessWidget {
     if (file != null) onCommit(file.path);
   }
 
+  /// 长文件名中段截断并保留扩展名（如「屏幕截图…png」），
+  /// 避免尾部 ellipsis 把「屏幕截图xxx.png」截成「屏幕…」看不出文件类型
+  static String _elideName(String name) {
+    const keep = 14; // 保留的头部字符数（不含 … 与扩展名）
+    if (name.length <= keep + 3) return name;
+    final dot = name.lastIndexOf('.');
+    final ext = dot > 0 ? name.substring(dot) : '';
+    final headLen = math.max(1, keep - ext.length);
+    return '${name.substring(0, headLen)}…$ext';
+  }
+
   @override
   Widget build(BuildContext context) {
     final path = node.data[field.key] as String? ?? '';
     final name = path.isEmpty ? '' : path.replaceAll('\\', '/').split('/').last;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  field.label,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.inkSecondary,
-                  ),
+          Text(
+            field.label,
+            style: const TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+          ),
+          const SizedBox(height: 6),
+          // 选择图片独占一行（整宽）：未选择显示引导，已选择显示文件名
+          // 悬浮 Tooltip 显示完整路径
+          SizedBox(
+            width: double.infinity,
+            child: Tooltip(
+              message: path,
+              child: OutlinedButton.icon(
+                onPressed: _pick,
+                icon: const Icon(Icons.image_outlined, size: 18),
+                label: Text(
+                  path.isEmpty ? '选择图片…' : _elideName(name),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 4),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 9,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.ivory,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppColors.outline),
-                  ),
-                  child: Text(
-                    path.isEmpty ? '未选择模板图片' : name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: path.isEmpty
-                          ? AppColors.inkSecondary
-                          : AppColors.ink,
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
-          const SizedBox(width: 8),
-          OutlinedButton(onPressed: _pick, child: const Text('选择…')),
+          // 已选择且文件存在 → 下方展示图片预览
+          if (path.isNotEmpty)
+            FutureBuilder<bool>(
+              future: File(path).exists(),
+              builder: (context, exists) {
+                if (exists.data != true) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: AppColors.ivory,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppColors.outline),
+                      ),
+                      child: Image.file(
+                        File(path),
+                        height: 120,
+                        width: double.infinity,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, _, _) => const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: Text(
+                            '图片无法预览（文件可能已移动）',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.inkSecondary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
         ],
       ),
     );
@@ -1133,7 +1388,8 @@ class _PortDocHeader extends StatelessWidget {
     final color = port.kind == PortKind.exec
         ? AppColors.execWire
         : AppColors.dataWire;
-    final badge = '${port.kind == PortKind.exec ? '执行流' : '数据'}'
+    final badge =
+        '${port.kind == PortKind.exec ? '执行流' : '数据'}'
         '·${port.dir == PortDir.input ? '输入' : '输出'}';
     return Row(
       children: [

@@ -7,8 +7,8 @@ import '../models/blueprint.dart';
 import '../models/key_names.dart';
 import '../platform/platform_automation.dart';
 import '../platform/recording.dart' show replayActions;
+import '../services/file_saver.dart';
 import '../services/recognition.dart';
-import '../services/script_storage.dart' show DataStore;
 import '../services/windows_recognition.dart' show loadTemplateFile;
 import 'variables.dart';
 
@@ -48,11 +48,18 @@ class BlueprintInterpreter {
   /// 最近一次截图（screenshot/ocr/imageMatch 节点共享）
   RawImage? _lastImage;
 
+  /// 图像左上角对应的屏幕坐标（虚拟桌面坐标，副屏在主屏左侧时可为负）。
+  /// 截图与裁剪都会登记，区域坐标换算与识别结果回算都以此为准。
+  final Expando<(int, int)> _imageOrigin = Expando<(int, int)>('imageOrigin');
+
   /// 输出数据端口缓存（本次运行内有效）
   final Map<PortRef, Object?> _portValues = {};
 
   /// 模板文件缓存
   final Map<String, RawImage> _templateCache = {};
+
+  /// 数据保存节点落盘服务（overrideDir 静态注入便于测试）
+  final SaveFileService _saver = SaveFileService();
 
   /// 循环节点剩余计数（-1 = 无限）
   final Map<String, int> _loopRemaining = {};
@@ -140,7 +147,7 @@ class BlueprintInterpreter {
         return 'out';
 
       case 'mouse':
-        await _executeMouse(n);
+        await _executeMouse(script, n);
         return 'out';
 
       case 'keyboard':
@@ -167,7 +174,8 @@ class BlueprintInterpreter {
         }
 
       case 'screenshot':
-        _lastImage = await _captureNow();
+        // 区域坐标支持负值（副屏在主屏左侧/上方时为负）
+        _lastImage = await _captureNow(region: _region(n));
         _portValues[PortRef(nodeId: n.id, port: 'imageOut')] = _lastImage;
         hooks.log('截图 ${_lastImage != null ? '${_lastImage!.width}×${_lastImage!.height}' : '失败'}');
         return 'out';
@@ -179,16 +187,25 @@ class BlueprintInterpreter {
           if (img == null) {
             hooks.log('OCR 失败：无可用图像');
             _writeOut(n, 'text', '');
+            _writeOut(n, 'found', false);
             return 'out';
           }
           final res = await recognition.recognizeText(img);
-          final fullX = (region?.x ?? 0) + res.x;
-          final fullY = (region?.y ?? 0) + res.y;
-          final varName = (n.params['resultVar'] as String?)?.trim() ?? '';
+          // 坐标输出为识别区域中心点：区域坐标X + 区域宽 ÷ 2
+          // （未框选区域时为所识别图像的中心，即全屏截图时的屏幕中心）
+          final (imgX, imgY) = _imageOrigin[img] ?? (0, 0);
+          final cx = region != null ? region.x + region.w ~/ 2 : imgX + img.width ~/ 2;
+          final cy = region != null ? region.y + region.h ~/ 2 : imgY + img.height ~/ 2;
+          // 变量名：「识别文本」数据输入优先，回退参数手写值
+          final varName =
+              ((await _resolveInput(script, n, 'resultVar', null, 'resultVar')) ?? '')
+                  .toString()
+                  .trim();
           if (varName.isNotEmpty) vars[varName] = res.text;
           _writeOut(n, 'text', res.text);
-          _writeOut(n, 'x', fullX);
-          _writeOut(n, 'y', fullY);
+          _writeOut(n, 'found', res.text.isNotEmpty);
+          _writeOut(n, 'x', cx);
+          _writeOut(n, 'y', cy);
           hooks.log('OCR: "${_brief(res.text)}" → ${varName.isEmpty ? '(未存变量)' : varName}');
           return 'out';
         }
@@ -211,14 +228,9 @@ class BlueprintInterpreter {
             return 'out';
           }
           final r = await recognition.matchTemplate(img, tpl, threshold: threshold);
-          final fullX = (region?.x ?? 0) + r.x;
-          final fullY = (region?.y ?? 0) + r.y;
-          final foundVar = (n.params['foundVar'] as String?)?.trim() ?? '';
-          final xVar = (n.params['posXVar'] as String?)?.trim() ?? '';
-          final yVar = (n.params['posYVar'] as String?)?.trim() ?? '';
-          if (foundVar.isNotEmpty) vars[foundVar] = r.found;
-          if (xVar.isNotEmpty) vars[xVar] = fullX;
-          if (yVar.isNotEmpty) vars[yVar] = fullY;
+          final (imgX, imgY) = _imageOrigin[img] ?? (0, 0);
+          final fullX = imgX + r.x;
+          final fullY = imgY + r.y;
           _setFound(n, r.found, x: fullX, y: fullY, score: r.score);
           hooks.log(
               '图像识别: ${r.found ? "命中" : "未命中"} score=${r.score.toStringAsFixed(3)} pos=($fullX,$fullY)');
@@ -275,25 +287,48 @@ class BlueprintInterpreter {
           return 'out';
         }
 
-      case 'storage':
+      case 'getVar':
         {
-          final key = ((n.params['key'] as String?) ?? '').trim();
           final name = ((n.params['name'] as String?) ?? '').trim();
-          final action = (n.params['action'] as String?) ?? 'save';
-          if (key.isEmpty || name.isEmpty) {
-            hooks.log('数据存取失败：键/变量名为空');
+          if (name.isEmpty) {
+            hooks.log('获取变量失败：变量名为空');
+            _writeOut(n, 'value', '');
             return 'out';
           }
-          if (action == 'save') {
-            final value = await _resolveInput(script, n, 'value', 'name', null) ?? vars[name] ?? '';
-            await DataStore.set(key, value);
-            hooks.log('存储: $key ← ${_brief(value)}');
-          } else {
-            final v = await DataStore.get(key);
-            if (v != null) vars[name] = v;
-            _writeOut(n, 'valueOut', v);
-            hooks.log('读取: $key → $name = ${_brief(v)}');
+          final v = vars.contains(name) ? vars[name] : '';
+          _writeOut(n, 'value', v);
+          hooks.log('读取变量 $name = ${_brief(v)}');
+          return 'out';
+        }
+
+      case 'saveData':
+        {
+          // 透传输出（与保存成败解耦：数据继续流给下游使用）
+          final imgEdge = script.inEdges(n.id, 'image', kind: EdgeKind.data);
+          final imgValue = imgEdge.isNotEmpty ? _portValues[imgEdge.first.from] : null;
+          if (imgValue is RawImage) _writeOut(n, 'imageOut', imgValue);
+          final textEdge = script.inEdges(n.id, 'text', kind: EdgeKind.data);
+          final hasText =
+              textEdge.isNotEmpty && _portValues.containsKey(textEdge.first.from);
+          if (hasText) _writeOut(n, 'textOut', _portValues[textEdge.first.from]);
+
+          final raw = ((n.params['fileName'] as String?) ?? '').trim();
+          if (raw.isEmpty) {
+            hooks.log('数据保存失败：文件名为空');
+            return 'out';
           }
+          var saved = false;
+          if (imgValue is RawImage) {
+            final p = await _saver.savePng(raw, imgValue);
+            saved = true;
+            hooks.log('已保存图像 → $p');
+          }
+          if (hasText) {
+            final p = await _saver.saveText(raw, '${_portValues[textEdge.first.from]}');
+            saved = true;
+            hooks.log('已保存文本 → $p');
+          }
+          if (!saved) hooks.log('数据保存：未连接文本/图像输入，未保存文件');
           return 'out';
         }
 
@@ -307,10 +342,10 @@ class BlueprintInterpreter {
 
   // ---- 鼠标 / 键盘动作 ----
 
-  Future<void> _executeMouse(BPNode n) async {
+  Future<void> _executeMouse(BlueprintScript script, BPNode n) async {
     final action = (n.params['action'] as String?) ?? 'click';
-    final x = _paramInt(n, 'x');
-    final y = _paramInt(n, 'y');
+    final x = _mouseCoord(script, n, 'x');
+    final y = _mouseCoord(script, n, 'y');
     final button = _mouseButton(n.params['button']);
     switch (action) {
       case 'click':
@@ -429,6 +464,20 @@ class BlueprintInterpreter {
     return int.tryParse('$v') ?? 0;
   }
 
+  /// 鼠标坐标：X/Y 数据输入有连接且上游已产出可解析数值时以输入为准
+  /// （属性面板对应参数此时为锁定只读），否则回退节点参数值。
+  /// 输入值非数字（如误连布尔/文本）时也回退参数，避免把光标移到 (0,0)。
+  int _mouseCoord(BlueprintScript script, BPNode n, String key) {
+    final edges = script.inEdges(n.id, key, kind: EdgeKind.data);
+    if (edges.isNotEmpty && _portValues.containsKey(edges.first.from)) {
+      final v = _portValues[edges.first.from];
+      if (v is num) return v.toInt();
+      final parsed = int.tryParse('$v'.trim());
+      if (parsed != null) return parsed;
+    }
+    return _paramInt(n, key);
+  }
+
   int _vkCode(BPNode n) {
     final v = n.params['vkCode'];
     if (v is num) return v.toInt();
@@ -479,7 +528,8 @@ class BlueprintInterpreter {
     return RectPx(x, y, w, h);
   }
 
-  /// 获取节点输入图像：数据边 > 上次截图 > 现场截屏
+  /// 获取节点输入图像：数据边 > 上次截图 > 现场截屏。
+  /// 区域裁剪按图像自身的屏幕原点换算，负坐标区域（副屏）同样有效。
   Future<RawImage?> _acquireImage(BlueprintScript script, BPNode n, {RectPx? region}) async {
     RawImage? img;
     final dataEdges = script.inEdges(n.id, 'image', kind: EdgeKind.data);
@@ -490,32 +540,42 @@ class BlueprintInterpreter {
     img ??= _lastImage;
     img ??= await _captureNow();
     if (img == null) return null;
-    if (region != null) return _cropImage(img, region);
-    return img;
+    if (region == null) return img;
+    final (ox, oy) = _imageOrigin[img] ?? (0, 0);
+    final cropped = cropImage(img, region, originX: ox, originY: oy);
+    _imageOrigin[cropped] = (region.x, region.y);
+    return cropped;
   }
 
-  Future<RawImage?> _captureNow() async {
+  Future<RawImage?> _captureNow({RectPx? region}) async {
     try {
-      final cap = await automation.capture();
-      return RawImage(cap.width, cap.height, cap.bgra);
+      final cap = await automation.capture(region: region);
+      final img = RawImage(cap.width, cap.height, cap.bgra);
+      _imageOrigin[img] = (cap.x, cap.y);
+      return img;
     } on UnsupportedError {
       return null;
     }
   }
 
-  RawImage _cropImage(RawImage img, RectPx r) => cropImage(img, r);
-
-  /// 裁剪图像区域。越界参数先钳制到图像内（直接 clamp 宽高会在起点越界时抛
-  /// ArgumentError，导致整个脚本中止），越界部分视为被图像边缘截断。
+  /// 裁剪图像区域。屏幕坐标先减去图像原点换算为图像内偏移，越界部分按
+  /// 图像边缘截断；负原点（副屏在主屏左侧）不会被折回图像左上角。
   @visibleForTesting
-  static RawImage cropImage(RawImage img, RectPx r) {
-    final x = r.x.clamp(0, img.width - 1);
-    final y = r.y.clamp(0, img.height - 1);
-    final w = r.w.clamp(1, img.width - x);
-    final h = r.h.clamp(1, img.height - y);
+  static RawImage cropImage(
+    RawImage img,
+    RectPx r, {
+    int originX = 0,
+    int originY = 0,
+  }) {
+    final left = (r.x - originX).clamp(0, img.width - 1);
+    final top = (r.y - originY).clamp(0, img.height - 1);
+    final right = (r.x - originX + r.w).clamp(left + 1, img.width);
+    final bottom = (r.y - originY + r.h).clamp(top + 1, img.height);
+    final w = right - left;
+    final h = bottom - top;
     final result = Uint8List(w * h * 4);
     for (var row = 0; row < h; row++) {
-      final srcStart = ((y + row) * img.width + x) * 4;
+      final srcStart = ((top + row) * img.width + left) * 4;
       result.setRange(row * w * 4, (row + 1) * w * 4, img.bgra, srcStart);
     }
     return RawImage(w, h, result);

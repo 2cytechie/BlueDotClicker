@@ -5,9 +5,19 @@ class ScreenCapture {
   final int width;
   final int height;
 
+  /// 采集区域左上角的屏幕坐标（虚拟桌面坐标；副屏在主屏左侧/上方时可为负）
+  final int x;
+  final int y;
+
   /// BGRA 顺序原始字节（Windows GDI 原生顺序）
   final Uint8List bgra;
-  const ScreenCapture(this.width, this.height, this.bgra);
+  const ScreenCapture(
+    this.width,
+    this.height,
+    this.bgra, {
+    this.x = 0,
+    this.y = 0,
+  });
 
   /// 转为 RGBA
   Uint8List toRgba() {

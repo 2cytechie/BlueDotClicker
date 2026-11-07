@@ -5,13 +5,14 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/blueprint.dart';
 
-/// 应用文档目录下的数据根目录（脚本、录制、数据存取共用）
+/// 应用文档目录下的数据根目录（脚本、录制、数据保存共用）
 const _appDirName = 'bluedot_clicker';
 
 /// 旧版本使用的数据目录名，首次启动时自动迁移到 [_appDirName]
 const _legacyAppDirName = 'blueprint_clicker';
 
-Future<Directory> _appDataDir() async {
+/// 应用数据根目录（脚本、录制、数据保存共用）
+Future<Directory> appDataDir() async {
   final doc = await getApplicationDocumentsDirectory();
   final d = Directory('${doc.path}/$_appDirName');
   final legacy = Directory('${doc.path}/$_legacyAppDirName');
@@ -32,7 +33,7 @@ class ScriptStorage {
   static void overrideDir(Directory dir) => _overrideDir = dir;
 
   Future<Directory> get dir async {
-    final base = _overrideDir ?? await _appDataDir();
+    final base = _overrideDir ?? await appDataDir();
     final d = Directory('${base.path}/scripts');
     if (!await d.exists()) await d.create(recursive: true);
     return d;
@@ -133,7 +134,7 @@ class RecordingStorage {
   static void overrideDir(Directory dir) => _overrideDir = dir;
 
   Future<Directory> get dir async {
-    final base = _overrideDir ?? await _appDataDir();
+    final base = _overrideDir ?? await appDataDir();
     final d = Directory('${base.path}/recordings');
     if (!await d.exists()) await d.create(recursive: true);
     return d;
@@ -197,46 +198,4 @@ class RecordingStorage {
     await save(r);
     return r;
   }
-}
-
-/// 数据存取节点的持久化 KV 存储：应用文档目录/data_store.json
-class DataStore {
-  static File? _file;
-  static Directory? _overrideDir;
-
-  /// 测试注入：覆盖存储目录（跳过 path_provider 插件）
-  static void overrideDir(Directory dir) => _overrideDir = dir;
-
-  static Future<File> get file async {
-    if (_overrideDir != null) {
-      final f = File('${_overrideDir!.path}/data_store.json');
-      if (!await f.exists()) await f.create(recursive: true);
-      return f;
-    }
-    if (_file != null) return _file!;
-    final base = await _appDataDir();
-    final f = File('${base.path}/data_store.json');
-    if (!await f.exists()) await f.create(recursive: true);
-    _file = f;
-    return f;
-  }
-
-  static Future<Map<String, Object>> _readAll() async {
-    final f = await file;
-    if (!await f.exists() || (await f.length()) == 0) return {};
-    try {
-      return Map<String, Object>.from(jsonDecode(await f.readAsString()) as Map);
-    } catch (_) {
-      return {};
-    }
-  }
-
-  static Future<void> set(String key, Object value) async {
-    final all = await _readAll();
-    all[key] = value;
-    final f = await file;
-    await f.writeAsString(jsonEncode(all));
-  }
-
-  static Future<Object?> get(String key) async => (await _readAll())[key];
 }

@@ -192,7 +192,7 @@ class _NodeBodyContent extends StatelessWidget {
           }
           if (node.type == 'ocr') {
             final r = v('resultVar');
-            if (r != null && r.isNotEmpty) lines.add('→ $r');
+            if (r != null && r.isNotEmpty) lines.add('识别文本 → $r');
           }
         }
         if (v('useRegion') == 'true') {
@@ -214,10 +214,10 @@ class _NodeBodyContent extends StatelessWidget {
         lines.add('等待 ${v('ms')}ms');
       case 'setVar':
         lines.add('${v('name')} = ${v('const')}');
-      case 'storage':
-        lines.add(
-          '${v('action') == 'save' ? '保存' : '读取'} ${v('key')} ↔ ${v('name')}',
-        );
+      case 'getVar':
+        lines.add(v('name')?.isEmpty == false ? '读取 ${v('name')}' : '未选择变量');
+      case 'saveData':
+        lines.add('保存 ${v('fileName')}');
       case 'start':
         final c = v('count') ?? '1'; // 旧脚本无此参数时按默认 1 次
         lines.add(c == '0' ? '一直执行（F10 停止）' : '执行 $c 次');

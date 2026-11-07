@@ -1,9 +1,11 @@
 import 'dart:convert';
 
+import 'package:bluedot_clicker/core/theme.dart' show AppColors;
 import 'package:bluedot_clicker/models/blueprint.dart';
 import 'package:bluedot_clicker/models/node_types.dart' show isKnownNodeType;
 import 'package:bluedot_clicker/ui/editor/node_bridge.dart';
 import 'package:fl_nodes_v2/fl_nodes_v2.dart' as fl;
+import 'package:flutter/material.dart' show Colors;
 import 'package:flutter_test/flutter_test.dart';
 
 BlueprintScript _sample() {
@@ -27,10 +29,10 @@ BlueprintScript _sample() {
 }
 
 void main() {
-  test('定义注册表包含全部 12 种节点类型', () {
+  test('定义注册表包含全部 13 种节点类型', () {
     expect(blueprintNodeRegistry, isNotNull);
     // 抽查几种关键类型定义可实例化（start 无参数字段，data 允许为空）
-    for (final type in ['start', 'mouse', 'keyboard', 'playRecording', 'screenshot', 'ocr', 'imageMatch', 'condition', 'loop', 'delay', 'setVar', 'storage']) {
+    for (final type in ['start', 'mouse', 'keyboard', 'playRecording', 'screenshot', 'ocr', 'imageMatch', 'condition', 'loop', 'delay', 'setVar', 'getVar', 'saveData']) {
       final node = blueprintNodeRegistry.instantiate(type, id: 't_$type', position: Offset.zero);
       expect(node.type, type, reason: '类型 $type 应可实例化');
       if (type != 'start') {
@@ -39,6 +41,31 @@ void main() {
       // 端口由定义派生
       expect(node.ports, isNotEmpty, reason: '类型 $type 应有派生端口');
     }
+  });
+
+  test('连线配色：执行流（control）白色、数据连线绿色', () {
+    final node = blueprintNodeRegistry.instantiate('mouse', id: 'm', position: Offset.zero);
+    final controlPort = node.ports.firstWhere((p) => p.kind == fl.PortKind.control);
+    final dataPort = node.ports.firstWhere((p) => p.kind == fl.PortKind.data);
+    expect(connectionAppearanceFor(controlPort).color, Colors.white);
+    expect(connectionAppearanceFor(dataPort).color, AppColors.success);
+  });
+
+  test('varName 参数收集：图中变量名去重汇集', () {
+    final c = fl.NodeEditorController(definitions: blueprintNodeRegistry);
+    addTearDown(c.dispose);
+    c.addNodes([
+      blueprintNodeRegistry.instantiate('setVar', id: 'a', position: Offset.zero),
+      blueprintNodeRegistry.instantiate('setVar', id: 'b', position: const Offset(200, 0)),
+      blueprintNodeRegistry.instantiate('getVar', id: 'g', position: const Offset(400, 0)),
+      blueprintNodeRegistry.instantiate('condition', id: 'cond', position: const Offset(600, 0)),
+    ]);
+    c.updateNode('a', (n) => n.withData({'name': 'hp'}));
+    c.updateNode('b', (n) => n.withData({'name': 'hp'}));
+    c.updateNode('g', (n) => n.withData({'name': ' '}));
+    c.updateNode('cond', (n) => n.withData({'leftVar': 'score', 'leftConst': ''}));
+    final names = graphVarNames(c.graph);
+    expect(names, {'hp', 'score'}, reason: '去重、剔除空白名');
   });
 
   test('已移除的节点类型不再注册，且加载时连同连线被过滤', () {
@@ -238,6 +265,60 @@ void main() {
       expect(c.connect(const fl.PortRef('st', 'out'), const fl.PortRef('a', 'in')), isNotNull);
       expect(c.connect(const fl.PortRef('a', 'out'), const fl.PortRef('b', 'in')), isNotNull);
       expect(c.graph.connections.length, 2);
+    });
+  });
+
+  group('数据输入接管参数：连接时归零', () {
+    fl.NodeEditorController mouseWithSource() {
+      final c = fl.NodeEditorController(definitions: blueprintNodeRegistry);
+      addTearDown(c.dispose);
+      c.addNodes([
+        blueprintNodeRegistry.instantiate('setVar', id: 'v', position: Offset.zero),
+        blueprintNodeRegistry.instantiate('mouse', id: 'm', position: const Offset(200, 0)),
+      ]);
+      return c;
+    }
+
+    test('X 接入数据后 x 归零，未连接的 y 不受影响', () {
+      final c = mouseWithSource();
+      c.updateNode('m', (n) => n.withData(const {'x': -809, 'y': 428}));
+
+      final id = c.connect(
+        const fl.PortRef('v', 'valueOut'),
+        const fl.PortRef('m', 'x'),
+      );
+      expect(id, isNotNull);
+      expect(
+        zeroParamOverriddenByInput(c, c.graph.connections[id!]!),
+        isTrue,
+      );
+
+      expect(c.graph.nodes['m']!.data['x'], 0);
+      expect(c.graph.nodes['m']!.data['y'], 428);
+    });
+
+    test('参数已是 0 时不产生额外写入（避免多余撤销记录）', () {
+      final c = mouseWithSource();
+      c.updateNode('m', (n) => n.withData(const {'x': 0, 'y': 428}));
+      final id = c.connect(
+        const fl.PortRef('v', 'valueOut'),
+        const fl.PortRef('m', 'x'),
+      );
+
+      expect(zeroParamOverriddenByInput(c, c.graph.connections[id!]!), isFalse);
+    });
+
+    test('执行流端口不对应参数时不写入', () {
+      final c = mouseWithSource();
+      c.updateNode('m', (n) => n.withData(const {'x': -809}));
+      final id = c.connect(
+        const fl.PortRef('v', 'out'),
+        const fl.PortRef('m', 'in'),
+      );
+      expect(id, isNotNull);
+
+      expect(zeroParamOverriddenByInput(c, c.graph.connections[id!]!), isFalse);
+      expect(c.graph.nodes['m']!.data['x'], -809);
     });
   });
 }

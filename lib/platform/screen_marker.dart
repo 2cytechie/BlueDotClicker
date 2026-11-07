@@ -67,13 +67,23 @@ void premultiplyRgbaToBgra(Uint8List src, Uint8List dst) {
   return (left, top, right, bottom);
 }
 
-/// 窗口位置 clamp：保持窗口位于主屏内（窗口不小于屏幕时锚定 (0,0)）
+/// 窗口位置 clamp：保持窗口位于可用区域内（窗口不小于该区域时锚定左上角）。
+/// [originX]/[originY] 为可用区域左上角（虚拟桌面可为主屏左侧的负坐标）。
 @visibleForTesting
-(int, int) clampWindowPos(int x, int y, int w, int h, int sw, int sh) {
-  final maxX = sw - w > 0 ? sw - w : 0;
-  final maxY = sh - h > 0 ? sh - h : 0;
-  final cx = x < 0 ? 0 : (x > maxX ? maxX : x);
-  final cy = y < 0 ? 0 : (y > maxY ? maxY : y);
+(int, int) clampWindowPos(
+  int x,
+  int y,
+  int w,
+  int h,
+  int sw,
+  int sh, {
+  int originX = 0,
+  int originY = 0,
+}) {
+  final maxX = originX + (sw - w > 0 ? sw - w : 0);
+  final maxY = originY + (sh - h > 0 ? sh - h : 0);
+  final cx = x < originX ? originX : (x > maxX ? maxX : x);
+  final cy = y < originY ? originY : (y > maxY ? maxY : y);
   return (cx, cy);
 }
 
@@ -369,15 +379,24 @@ class ScreenMarkerService {
     final margin = _marginPx();
     final x = p.x - margin;
     final y = p.y - margin;
-    final sw = u32.screenW();
-    final sh = u32.screenH();
-    if (x < 0 || y < 0 || x + _window.width > sw || y + _window.height > sh) {
+    final (vx, vy, vw, vh) = _virtualRect();
+    if (x < vx ||
+        y < vy ||
+        x + _window.width > vx + vw ||
+        y + _window.height > vy + vh) {
       return false; // 需 clamp → 窗口内局部偏移要重算 → 全渲染
     }
     if (!_window.fits(2 * margin, 2 * margin)) return false;
     if (!_window.moveTo(x, y)) return false;
     _cursorApplied = (p.x, p.y);
     return true;
+  }
+
+  /// 虚拟桌面范围（多屏并集；副屏在主屏左侧/上方时为负原点）
+  static (int, int, int, int) _virtualRect() {
+    final (vx, vy, vw, vh) = u32.virtualScreenRect();
+    if (vw <= 0 || vh <= 0) return (0, 0, u32.screenW(), u32.screenH());
+    return (vx, vy, vw, vh);
   }
 
   // ---- Flutter 离屏渲染 → 分层窗口 ----
@@ -390,8 +409,8 @@ class ScreenMarkerService {
     final margin = _marginPx(); // 阴影/描边余量（物理像素）
 
     final (left, top, right, bottom) = tightMarkerBox(_points, margin);
-    final sw = u32.screenW();
-    final sh = u32.screenH();
+    // clamp 基准用虚拟桌面而非主屏：负坐标（副屏）图标不再被拽回主屏
+    final (vx, vy, vw, vh) = _virtualRect();
 
     // 容量窗口：现有窗口放得下就复用（位置随后由 ULW 移动），
     // 放不下才按 64px 粒度量化重建——拖 swipe 图标时包围盒逐 tick 变化也不再逐帧销毁重建
@@ -399,13 +418,31 @@ class ScreenMarkerService {
       _fastReady = false;
       final w = (right - left + _quantum - 1) & ~(_quantum - 1);
       final h = (bottom - top + _quantum - 1) & ~(_quantum - 1);
-      final (cx, cy) = clampWindowPos(left, top, w, h, sw, sh);
+      final (cx, cy) = clampWindowPos(
+        left,
+        top,
+        w,
+        h,
+        vw,
+        vh,
+        originX: vx,
+        originY: vy,
+      );
       _window.create(cx, cy, w, h);
       if (!_window.isValid) return;
     }
     final winW = _window.width;
     final winH = _window.height;
-    final (winX, winY) = clampWindowPos(left, top, winW, winH, sw, sh);
+    final (winX, winY) = clampWindowPos(
+      left,
+      top,
+      winW,
+      winH,
+      vw,
+      vh,
+      originX: vx,
+      originY: vy,
+    );
 
     // 绘制（画布 = 窗口区域，坐标 = 物理像素 - 窗口原点）
     final recorder = ui.PictureRecorder();

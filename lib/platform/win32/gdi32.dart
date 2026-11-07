@@ -88,32 +88,59 @@ int selectObject(int hdc, int obj) => _selectObject(hdc, obj);
   return (hbm, bits);
 }
 
-/// 区域参数钳制到屏幕内（负值/越界安全）。
+/// 区域参数钳制到可用范围内（负值/越界安全）。
+/// [originX]/[originY] 为可用区域左上角：虚拟桌面的原点可为负（副屏在主屏左侧/上方）。
 /// 直接 clamp 会在 x≥屏宽时因 `clamp(1, 负数)` 抛 ArgumentError，先钳起点再钳宽高。
 @visibleForTesting
-(int, int, int, int) clampRegionToScreen(int x, int y, int w, int h, int sw, int sh) {
-  final cx = x.clamp(0, sw - 1);
-  final cy = y.clamp(0, sh - 1);
-  return (cx, cy, w.clamp(1, sw - cx), h.clamp(1, sh - cy));
+(int, int, int, int) clampRegionToScreen(
+  int x,
+  int y,
+  int w,
+  int h,
+  int sw,
+  int sh, {
+  int originX = 0,
+  int originY = 0,
+}) {
+  final rw = sw > 0 ? sw : 1;
+  final rh = sh > 0 ? sh : 1;
+  final right = originX + rw;
+  final bottom = originY + rh;
+  final cx = x.clamp(originX, right - 1);
+  final cy = y.clamp(originY, bottom - 1);
+  return (cx, cy, w.clamp(1, right - cx), h.clamp(1, bottom - cy));
 }
 
-/// 截取屏幕指定区域（物理像素），返回 BGRA 自顶向下像素。
-/// [region] 为空时截取全屏。
+/// 虚拟桌面范围（多屏并集）；系统未返回有效尺寸时回退主屏。
+(int, int, int, int) _captureRect() {
+  final (vx, vy, vw, vh) = u32.virtualScreenRect();
+  if (vw > 0 && vh > 0) return (vx, vy, vw, vh);
+  return (0, 0, u32.screenW(), u32.screenH());
+}
+
+/// 截取屏幕指定区域（物理像素），返回 BGRA 自顶向下像素与区域原点。
+/// [region] 为空时截取整个虚拟桌面（含主屏两侧/上方的副屏）。
 ScreenCapture captureScreen({RectPx? region}) {
-  final sw = u32.screenW();
-  final sh = u32.screenH();
-  final (x, y, w, h) = region == null
-      ? (0, 0, sw, sh)
-      : clampRegionToScreen(region.x, region.y, region.w, region.h, sw, sh);
-  final cw = w;
-  final ch = h;
+  final (vx, vy, vw, vh) = _captureRect();
+  final (x, y, cw, ch) = region == null
+      ? (vx, vy, vw, vh)
+      : clampRegionToScreen(
+          region.x,
+          region.y,
+          region.w,
+          region.h,
+          vw,
+          vh,
+          originX: vx,
+          originY: vy,
+        );
 
   final hdcScreen = _getDC(0);
   final hdcMem = _createCompatibleDC(hdcScreen);
   final hbm = _createCompatibleBitmap(hdcScreen, cw, ch);
   final old = _selectObject(hdcMem, hbm);
+  // 屏幕 DC 覆盖整个虚拟桌面：源坐标可直接使用负值（副屏在主屏左侧/上方）
   _bitBlt(hdcMem, 0, 0, cw, ch, hdcScreen, x, y, srccopy | captureblt);
-
   final bmi = calloc<_BITMAPINFO>();
   final header = bmi.ref.bmiHeader;
   header.biSize = sizeOf<_BITMAPINFOHEADER>();
@@ -135,5 +162,5 @@ ScreenCapture captureScreen({RectPx? region}) {
   _deleteDC(hdcMem);
   _releaseDC(0, hdcScreen);
 
-  return ScreenCapture(cw, ch, bytes);
+  return ScreenCapture(cw, ch, bytes, x: x, y: y);
 }
