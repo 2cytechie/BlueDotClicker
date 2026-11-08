@@ -163,10 +163,7 @@ const kMouseActions = [
 ];
 
 /// 键盘动作（`keyboard` 节点的 action 取值）
-const kKeyboardActions = [
-  EnumOption('tap', '按键'),
-  EnumOption('combo', '组合键'),
-];
+const kKeyboardActions = [EnumOption('tap', '按键'), EnumOption('combo', '组合键')];
 
 String _labelOf(List<EnumOption> options, Object? value) {
   for (final o in options) {
@@ -179,7 +176,8 @@ String _labelOf(List<EnumOption> options, Object? value) {
 String mouseActionLabel(Object? action) => _labelOf(kMouseActions, action);
 
 /// 键盘动作中文名（未知取值原样返回）
-String keyboardActionLabel(Object? action) => _labelOf(kKeyboardActions, action);
+String keyboardActionLabel(Object? action) =>
+    _labelOf(kKeyboardActions, action);
 
 /// 全部节点类型定义表（编辑器 / 属性面板 / 执行引擎共用）
 final List<NodeTypeDef> kNodeTypes = [
@@ -200,8 +198,10 @@ final List<NodeTypeDef> kNodeTypes = [
     title: '鼠标操作',
     category: NodeCategory.interaction,
     icon: Icons.mouse_rounded,
-    description: '按所选动作操作鼠标：单击/双击/滑动/长按/滚轮/移动到。'
-        'X/Y 坐标可选接入上游数据（如识别结果），接入后坐标参数自动锁定。',
+    description:
+        '按所选动作操作鼠标：单击/双击/滑动/长按/滚轮/移动到。'
+        'X/Y 坐标可选接入上游数据（如识别结果），接入后坐标参数自动锁定。'
+        '补充：滚轮滚动距离（120=一格）。滚轮水平滚动（正=右）。滚轮垂直滚动（正=上）。',
     inputs: [
       _inExec(),
       _inData(
@@ -343,7 +343,7 @@ final List<NodeTypeDef> kNodeTypes = [
       ),
       ParamFieldDef(
         'dx',
-        '滚轮水平(120=一格,正=右)',
+        '滚轮水平滚动',
         ParamType.int,
         defaultValue: 0,
         visibleWhen: const {
@@ -352,9 +352,9 @@ final List<NodeTypeDef> kNodeTypes = [
       ),
       ParamFieldDef(
         'dy',
-        '滚轮垂直(120=一格,正=上)',
+        '滚轮垂直滚动',
         ParamType.int,
-        defaultValue: 120,
+        defaultValue: 0,
         visibleWhen: const {
           'action': {'scroll'},
         },
@@ -434,8 +434,7 @@ final List<NodeTypeDef> kNodeTypes = [
     inputs: [_inExec()],
     outputs: [
       _outExec(),
-      _outData('imageOut', '图像',
-          note: '截取的屏幕图像，可连接「文字识别/图像识别」的图像输入'),
+      _outData('imageOut', '图像', note: '截取的屏幕图像，可连接「文字识别/图像识别」的图像输入'),
     ],
     params: _regionFields,
   ),
@@ -444,7 +443,8 @@ final List<NodeTypeDef> kNodeTypes = [
     title: '文字识别',
     category: NodeCategory.media,
     icon: Icons.text_fields_rounded,
-    description: '对图像/屏幕区域进行文字识别（OCR），识别出的完整文本从「文本」输出端口连线给下游，'
+    description:
+        '对图像/屏幕区域进行文字识别（OCR），识别出的完整文本从「文本」输出端口连线给下游，'
         '也可写入「识别文本」指定的变量（留空则不存；变量名可手写或由输入连接提供）；坐标输出为识别区域中心点',
     inputs: [
       _inExec(),
@@ -458,15 +458,13 @@ final List<NodeTypeDef> kNodeTypes = [
       _inData(
         'resultVar',
         '识别文本',
-        note:
-            '可选。连接上游文本时，识别文本写入该文本指定的变量名，属性面板中的「识别文本」参数锁定为只读；不连接时使用参数手写的变量名。',
+        note: '可选。连接上游文本时，识别文本写入该文本指定的变量名，属性面板中的「识别文本」参数锁定为只读；不连接时使用参数手写的变量名。',
       ),
     ],
     outputs: [
       _outExec(),
       _outData('text', '文本', note: '识别出的完整文本（字符串），可连接下游节点的数据输入'),
-      _outData('found', '是否命中',
-          note: '是否识别到文本（识别结果非空为 true），可连接「条件判断」节点的数据输入'),
+      _outData('found', '是否命中', note: '是否识别到文本（识别结果非空为 true），可连接「条件判断」节点的数据输入'),
       _outData('x', '坐标X', note: '识别区域中心点的 X 坐标（区域坐标X + 区域宽 ÷ 2；未框选区域时为屏幕中心）'),
       _outData('y', '坐标Y', note: '识别区域中心点的 Y 坐标（区域坐标Y + 区域高 ÷ 2；未框选区域时为屏幕中心）'),
     ],
@@ -486,7 +484,8 @@ final List<NodeTypeDef> kNodeTypes = [
     title: '图像识别',
     category: NodeCategory.media,
     icon: Icons.image_search_rounded,
-    description: '在屏幕/图像中匹配模板图（游戏UI元素），命中结果'
+    description:
+        '在屏幕/图像中匹配模板图（游戏UI元素），命中结果'
         '（是否命中/坐标X/坐标Y/相似度）从输出端口连线给下游节点使用',
     inputs: [
       _inExec(),
@@ -498,12 +497,9 @@ final List<NodeTypeDef> kNodeTypes = [
     ],
     outputs: [
       _outExec(),
-      _outData('found', '是否命中',
-          note: '是否命中（true/false），可连接「条件判断」节点的数据输入'),
-      _outData('x', '坐标X',
-          note: '命中区域中心在屏幕上的 X 坐标（未命中时为最佳匹配位置；区域模式时含区域偏移）'),
-      _outData('y', '坐标Y',
-          note: '命中区域中心在屏幕上的 Y 坐标（未命中时为最佳匹配位置；区域模式时含区域偏移）'),
+      _outData('found', '是否命中', note: '是否命中（true/false），可连接「条件判断」节点的数据输入'),
+      _outData('x', '坐标X', note: '命中区域中心在屏幕上的 X 坐标（未命中时为最佳匹配位置；区域模式时含区域偏移）'),
+      _outData('y', '坐标Y', note: '命中区域中心在屏幕上的 Y 坐标（未命中时为最佳匹配位置；区域模式时含区域偏移）'),
       _outData('score', '相似度', note: '相似度得分（0.0~1.0，越接近 1 越相似）'),
     ],
     params: [
@@ -613,44 +609,44 @@ final List<NodeTypeDef> kNodeTypes = [
     title: '获取变量',
     category: NodeCategory.data,
     icon: Icons.data_object_rounded,
-    description: '读取已设置变量的当前值并从「值」端口输出，可连接任意数据输入；'
+    description:
+        '读取已设置变量的当前值并从「值」端口输出，可连接任意数据输入；'
         '变量名可在属性面板下拉选择（或从节点库「变量」分类点击变量创建）',
     // 数据端口只有输出（用户要求）；执行流端口保留以接入链路
     inputs: [_inExec()],
     outputs: [
       _outExec(),
-      _outData('value', '值',
-          note: '所选变量当前的值（数字/字符串/布尔），可连接任意数据输入端口'),
+      _outData('value', '值', note: '所选变量当前的值（数字/字符串/布尔），可连接任意数据输入端口'),
     ],
-    params: [
-      ParamFieldDef('name', '变量名', ParamType.varName, defaultValue: ''),
-    ],
+    params: [ParamFieldDef('name', '变量名', ParamType.varName, defaultValue: '')],
   ),
   NodeTypeDef(
     type: 'saveData',
     title: '数据保存',
     category: NodeCategory.data,
     icon: Icons.save_as_outlined,
-    description: '把上游数据保存为文件：文本存为 .txt，图像存为 .png，'
+    description:
+        '把上游数据保存为文件：文本存为 .txt，图像存为 .png，'
         '保存到「我的文档\\bluedot_clicker\\save\\」文件夹下，同名文件自动加序号；'
         '保存的数据从「文本」「图像」输出端口继续输出，可连线给下游使用（运行日志中也会显示保存路径）',
     inputs: [
       _inExec(),
-      _inData('text', '文本',
-          note: '可选。连接文本类输出（如「文字识别」的「文本」），保存为 .txt 文件'),
-      _inData('image', '图像',
-          note: '可选。连接「截图」节点的「图像」输出，保存为 .png 图片'),
+      _inData('text', '文本', note: '可选。连接文本类输出（如「文字识别」的「文本」），保存为 .txt 文件'),
+      _inData('image', '图像', note: '可选。连接「截图」节点的「图像」输出，保存为 .png 图片'),
     ],
     outputs: [
       _outExec(),
-      _outData('textOut', '文本',
-          note: '透传所连接的「文本」输入数据，保存后可继续连线给下游节点'),
-      _outData('imageOut', '图像',
-          note: '透传所连接的「图像」输入数据，保存后可继续连线给下游节点'),
+      _outData('textOut', '文本', note: '透传所连接的「文本」输入数据，保存后可继续连线给下游节点'),
+      _outData('imageOut', '图像', note: '透传所连接的「图像」输入数据，保存后可继续连线给下游节点'),
     ],
     params: [
-      ParamFieldDef('fileName', '保存文件名', ParamType.string,
-          defaultValue: 'result', hint: '不含扩展名'),
+      ParamFieldDef(
+        'fileName',
+        '保存文件名',
+        ParamType.string,
+        defaultValue: 'result',
+        hint: '不含扩展名',
+      ),
     ],
   ),
 ];
