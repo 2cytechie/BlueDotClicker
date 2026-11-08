@@ -60,7 +60,7 @@ class PropertyPanel extends ConsumerWidget {
   }
 
   /// 各行坐标对应的操作：拾取坐标（点坐标）/ 屏幕定位（拖动图标改坐标）。
-  /// 键为坐标对的 X 参数键（'x' / 'startX' / 'endX'）。
+  /// 键为坐标对的 X 参数键（'x' / 'endX'；拖拽起点复用 'x'）。
   Map<String, _CoordActions> _coordActions(
     fl.GraphNode node,
     Map<String, Object?> data,
@@ -74,17 +74,17 @@ class PropertyPanel extends ConsumerWidget {
         nodeId: node.id,
         label: '拖拽起点',
         points: [
-          LocatePointDef('startX', 'startY', AppColors.peacock.toARGB32()),
+          LocatePointDef('x', 'y', AppColors.peacock.toARGB32()),
           if (withEnd)
             LocatePointDef('endX', 'endY', AppColors.nodeMedia.toARGB32()),
         ],
       );
       return {
-        'startX': _CoordActions(
+        'x': _CoordActions(
           pick: PickTarget(
             nodeId: node.id,
-            keyX: 'startX',
-            keyY: 'startY',
+            keyX: 'x',
+            keyY: 'y',
             label: '拾取起点坐标',
           ),
           locate: locate,
@@ -125,7 +125,6 @@ class PropertyPanel extends ConsumerWidget {
   /// 左右并排渲染的参数对（其余字段维持上下排列）
   static const List<(String, String)> _kCoordPairs = [
     ('x', 'y'),
-    ('startX', 'startY'),
     ('endX', 'endY'),
     ('dx', 'dy'),
     // 媒体节点区域参数：左上角 X/Y 一行，右下角 X/Y 一行
@@ -153,7 +152,7 @@ class PropertyPanel extends ConsumerWidget {
     final data = _effectiveData(node);
     final def = nodeDef(node.type);
     final params = def.params.where((f) => f.visibleFor(data)).toList();
-    // 坐标操作按 keyX 索引：'x'/'startX'/'endX' 分别对应一行坐标对
+    // 坐标操作按 keyX 索引：'x'/'endX' 分别对应一行坐标对（拖拽起点复用 x）
     final actionsByKeyX = _coordActions(node, data);
     // 数据输入已连接且接管了某个参数 → 参数灰显只读并保留原值。
     // 默认同名接管；`lockedByPort` 支持不同名映射（如 setVar.value → const）。

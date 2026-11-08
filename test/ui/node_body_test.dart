@@ -1,4 +1,4 @@
-﻿﻿import 'package:bluedot_clicker/ui/editor/node_body.dart';
+import 'package:bluedot_clicker/ui/editor/node_body.dart';
 import 'package:bluedot_clicker/ui/editor/node_bridge.dart';
 import 'package:fl_nodes_v2/fl_nodes_v2.dart' as fl;
 import 'package:flutter/material.dart';

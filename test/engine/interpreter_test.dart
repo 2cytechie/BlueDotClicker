@@ -687,16 +687,16 @@ void main() {
         _node('a', 'start'),
         _mouse('sw', 'swipe', {
           'mode': 'direction',
-          'startX': 100,
-          'startY': 100,
+          'x': 100,
+          'y': 100,
           'angle': 0,
           'distance': 50,
           'durationMs': 1,
         }),
         _mouse('sw2', 'swipe', {
           'mode': 'coords',
-          'startX': 1,
-          'startY': 2,
+          'x': 1,
+          'y': 2,
           'endX': 3,
           'endY': 4,
           'durationMs': 1,
@@ -711,7 +711,7 @@ void main() {
       expect(auto.calls, contains('swipe(1,2->3,4)'));
     });
 
-    test('拖拽支持鼠标键与起终点数据输入', () async {
+    test('拖拽支持鼠标键与起终点数据输入（起点复用 x/y）', () async {
       final s = _build([
         _node('a', 'start'),
         _node('sx', 'setVar', {'name': 'sx', 'const': '10'}),
@@ -720,8 +720,8 @@ void main() {
         _node('ey', 'setVar', {'name': 'ey', 'const': '40'}),
         _mouse('sw', 'swipe', {
           'mode': 'coords',
-          'startX': 1,
-          'startY': 2,
+          'x': 1,
+          'y': 2,
           'endX': 3,
           'endY': 4,
           'durationMs': 1,
@@ -733,8 +733,9 @@ void main() {
         _edge('e3', 'sy', 'out', 'ex', 'in'),
         _edge('e4', 'ex', 'out', 'ey', 'in'),
         _edge('e5', 'ey', 'out', 'sw', 'in'),
-        _edge('d1', 'sx', 'valueOut', 'sw', 'startX', kind: EdgeKind.data),
-        _edge('d2', 'sy', 'valueOut', 'sw', 'startY', kind: EdgeKind.data),
+        // 拖拽起点复用 x/y 数据输入
+        _edge('d1', 'sx', 'valueOut', 'sw', 'x', kind: EdgeKind.data),
+        _edge('d2', 'sy', 'valueOut', 'sw', 'y', kind: EdgeKind.data),
         _edge('d3', 'ex', 'valueOut', 'sw', 'endX', kind: EdgeKind.data),
         _edge('d4', 'ey', 'valueOut', 'sw', 'endY', kind: EdgeKind.data),
       ]);
@@ -751,8 +752,8 @@ void main() {
         _node('ex', 'setVar', {'name': 'ex', 'const': '999'}),
         _mouse('sw', 'swipe', {
           'mode': 'direction',
-          'startX': 100,
-          'startY': 100,
+          'x': 100,
+          'y': 100,
           'angle': 0,
           'distance': 50,
           'durationMs': 1,

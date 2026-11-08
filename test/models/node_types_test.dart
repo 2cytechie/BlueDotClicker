@@ -79,9 +79,9 @@ void main() {
         {
           'action',
           'button',
+          'x',
+          'y',
           'mode',
-          'startX',
-          'startY',
           'endX',
           'endY',
           'durationMs',
@@ -95,14 +95,18 @@ void main() {
         {
           'action',
           'button',
+          'x',
+          'y',
           'mode',
-          'startX',
-          'startY',
           'angle',
           'distance',
           'durationMs',
         },
       );
+      // 拖拽起点复用 x/y，不再有独立的起点参数
+      final swipeKeys = _visibleKeys(nodeDef('mouse'), {'action': 'swipe'});
+      expect(swipeKeys.contains('startX'), isFalse);
+      expect(swipeKeys.contains('startY'), isFalse);
     });
 
     test('旧动作 press/release 不再显示任何坐标字段（仅剩动作下拉）', () {
@@ -120,8 +124,6 @@ void main() {
       expect(dataIns.map((p) => p.key), [
         'x',
         'y',
-        'startX',
-        'startY',
         'endX',
         'endY',
       ]);

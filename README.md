@@ -9,7 +9,7 @@ Windows 自动化工具：基于蓝图工作流的连点器。
 | 节点 | 类型 key | 分类 | 执行流输入 | 执行流输出 | 数据输入 | 数据输出 |
 |---|---|---|---|---|---|---|
 | 开始 | `start` | 脚本 | 无 | `out` | 无 | 无 |
-| 鼠标操作 | `mouse` | 交互 | `in` | `out` | `x`/`y`、`startX`/`startY`、`endX`/`endY` | 无 |
+| 鼠标操作 | `mouse` | 交互 | `in` | `out` | `x`/`y`（拖拽时复用为起点）、`endX`/`endY` | 无 |
 | 键盘操作 | `keyboard` | 交互 | `in` | `out` | 无 | 无 |
 | 执行录制 | `playRecording` | 交互 | `in` | `out` | 无 | `success` 成功 |
 | 截图 | `screenshot` | 媒体 | `in` | `out` | `left`/`top`/`right`/`bottom` 区域角点 | `imageOut` 图像、`success` 成功 |
@@ -31,7 +31,7 @@ Windows 自动化工具：基于蓝图工作流的连点器。
 | 节点 | 参数 |
 |---|---|
 | 开始 | `count`=1（执行次数，0=一直执行，F10 停止） |
-| 鼠标操作 | `action`=click（click/doubleClick/swipe/longPress/scroll/move）、`button`=left、`x`=100、`y`=100、`mode`=coords、`startX`=400、`startY`=300、`endX`=600、`endY`=300、`angle`=0、`distance`=200、`durationMs`=300、`moveDurationMs`=0、`holdMs`=800、`dx`=0、`dy`=120 |
+| 鼠标操作 | `action`=click（click/doubleClick/swipe/longPress/scroll/move）、`button`=left、`x`=100、`y`=100（拖拽时复用为起点）、`mode`=coords、`endX`=600、`endY`=300、`angle`=0、`distance`=200、`durationMs`=300、`moveDurationMs`=0、`holdMs`=800、`dx`=0、`dy`=120 |
 | 键盘操作 | `action`=tap（tap 按键 / combo 组合键）、`vkCode`=0、`comboKeys`=[]、`durationMs`=60 |
 | 执行录制 | `recordingId`='' |
 | 截图 | `useRegion`=false、`left`=0、`top`=0、`right`=400、`bottom`=300 |

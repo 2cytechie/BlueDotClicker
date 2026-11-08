@@ -155,7 +155,7 @@ class _NodeBodyContent extends StatelessWidget {
                 lines.add('方向 ${v('angle')}° 距离 ${v('distance')}');
               } else {
                 lines.add(
-                  '(${v('startX')},${v('startY')}) → (${v('endX')},${v('endY')})',
+                  '(${v('x')},${v('y')}) → (${v('endX')},${v('endY')})',
                 );
               }
               lines.add('${v('durationMs')}ms ${_buttonName(v('button'))}');

@@ -57,12 +57,26 @@ class BPNode {
     return m;
   }
 
-  /// 旧脚本参数迁移：媒体节点区域从 rx/ry/rw/rh 换算为两角点。
+  /// 旧脚本参数迁移：
+  /// - 媒体节点区域从 rx/ry/rw/rh 换算为两角点；
+  /// - 鼠标拖拽起点从 startX/startY 迁移到 x/y（起点复用 X/Y）。
   /// 新键已存在时以新键为准；换算后移除旧键，保存时写回新格式。
   static Map<String, dynamic> _migrateParams(
     String type,
     Map<String, dynamic> params,
   ) {
+    if (type == 'mouse') {
+      const oldKeys = ['startX', 'startY'];
+      if (!oldKeys.any(params.containsKey)) return params;
+      if (params['action'] == 'swipe') {
+        if (params.containsKey('startX')) params['x'] = params['startX'];
+        if (params.containsKey('startY')) params['y'] = params['startY'];
+      }
+      for (final k in oldKeys) {
+        params.remove(k);
+      }
+      return params;
+    }
     if (type != 'screenshot' && type != 'ocr' && type != 'imageMatch') {
       return params;
     }

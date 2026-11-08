@@ -124,15 +124,26 @@ void main() {
   });
 
   test('动作切换后坐标不再适用时自动关闭定位', () {
+    controller.updateNode('m1', (n) => n.withData(const {'action': 'swipe'}));
     final marker = _FakeMarker();
     final container = containerWith(marker);
 
+    // 定位拖拽起点+终点（起点复用 x/y）
     container.read(screenLocateProvider.notifier).toggle(
       controller: controller,
-      target: xyTarget(),
+      target: const ScreenLocateTarget(
+        nodeId: 'm1',
+        label: '拖拽起点',
+        points: [
+          LocatePointDef('x', 'y', 0xFF658AE4),
+          LocatePointDef('endX', 'endY', 0xFF3FA0D6),
+        ],
+      ),
     );
-    // 切换为拖拽：x/y 不再是可见参数（改为起点/终点）
-    controller.updateNode('m1', (n) => n.withData(const {'action': 'swipe'}));
+    expect(container.read(screenLocateProvider).active, isTrue);
+
+    // 切换为单击：终点 endX/endY 不再是可见参数 → 自动关闭
+    controller.updateNode('m1', (n) => n.withData(const {'action': 'click'}));
 
     expect(container.read(screenLocateProvider).active, isFalse);
   });
@@ -151,13 +162,13 @@ void main() {
     expect(marker.points.single.y, 600);
   });
 
-  test('拖拽定位拖动终点只回写 endX/endY', () {
+  test('拖拽定位拖动终点只回写 endX/endY（起点复用 x/y）', () {
     controller.updateNode(
       'm1',
       (n) => n.withData(const {
         'action': 'swipe',
-        'startX': 10,
-        'startY': 20,
+        'x': 10,
+        'y': 20,
         'endX': 30,
         'endY': 40,
       }),
@@ -171,7 +182,7 @@ void main() {
         nodeId: 'm1',
         label: '拖拽起点',
         points: [
-          LocatePointDef('startX', 'startY', 0xFF658AE4),
+          LocatePointDef('x', 'y', 0xFF658AE4),
           LocatePointDef('endX', 'endY', 0xFF3FA0D6),
         ],
       ),
@@ -179,8 +190,8 @@ void main() {
     expect(marker.points.length, 2);
 
     marker.onDragEnd!(1, 700, 800);
-    expect(data()['startX'], 10);
-    expect(data()['startY'], 20);
+    expect(data()['x'], 10);
+    expect(data()['y'], 20);
     expect(data()['endX'], 700);
     expect(data()['endY'], 800);
   });

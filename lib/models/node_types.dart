@@ -261,29 +261,20 @@ final List<NodeTypeDef> kNodeTypes = [
     icon: Icons.mouse_rounded,
     description:
         '按所选动作操作鼠标：单击/双击/拖拽/长按/滚轮/移动到。'
-        'X/Y 坐标可选接入上游数据（如识别结果），接入后坐标参数自动锁定。'
+        'X/Y 坐标可选接入上游数据（如识别结果），接入后坐标参数自动锁定；'
+        '拖拽时起点复用 X/Y，终点使用「拖拽终点X/Y」参数。'
         '补充：滚轮滚动距离（120=一格）。滚轮水平滚动（正=右）。滚轮垂直滚动（正=上）。',
     inputs: [
       _inExec(),
       _inData(
         'x',
         'X 坐标',
-        note: '可选。连接上游数据后，本节点的 X 坐标由输入值决定，属性面板中的「X 坐标」参数锁定为只读；不连接时使用参数值。',
+        note: '可选。单击/双击/长按/滚轮/移动的目标 X；动作=拖拽时为拖拽起点 X。连接上游数据后对应参数锁定为只读；不连接时使用参数值。',
       ),
       _inData(
         'y',
         'Y 坐标',
-        note: '可选。连接上游数据后，本节点的 Y 坐标由输入值决定，属性面板中的「Y 坐标」参数锁定为只读；不连接时使用参数值。',
-      ),
-      _inData(
-        'startX',
-        '拖拽起点X',
-        note: '可选。仅在动作=拖拽时生效；连接后拖拽起点 X 由输入值决定，参数锁定只读。',
-      ),
-      _inData(
-        'startY',
-        '拖拽起点Y',
-        note: '可选。仅在动作=拖拽时生效；连接后拖拽起点 Y 由输入值决定，参数锁定只读。',
+        note: '可选。单击/双击/长按/滚轮/移动的目标 Y；动作=拖拽时为拖拽起点 Y。连接上游数据后对应参数锁定为只读；不连接时使用参数值。',
       ),
       _inData(
         'endX',
@@ -321,7 +312,7 @@ final List<NodeTypeDef> kNodeTypes = [
         ParamType.int,
         defaultValue: 100,
         visibleWhen: const {
-          'action': {'click', 'doubleClick', 'longPress', 'scroll', 'move'},
+          'action': {'click', 'doubleClick', 'swipe', 'longPress', 'scroll', 'move'},
         },
       ),
       ParamFieldDef(
@@ -330,7 +321,7 @@ final List<NodeTypeDef> kNodeTypes = [
         ParamType.int,
         defaultValue: 100,
         visibleWhen: const {
-          'action': {'click', 'doubleClick', 'longPress', 'scroll', 'move'},
+          'action': {'click', 'doubleClick', 'swipe', 'longPress', 'scroll', 'move'},
         },
       ),
       ParamFieldDef(
@@ -342,24 +333,6 @@ final List<NodeTypeDef> kNodeTypes = [
           EnumOption('coords', '起点终点'),
           EnumOption('direction', '方向距离'),
         ],
-        visibleWhen: const {
-          'action': {'swipe'},
-        },
-      ),
-      ParamFieldDef(
-        'startX',
-        '起点X',
-        ParamType.int,
-        defaultValue: 400,
-        visibleWhen: const {
-          'action': {'swipe'},
-        },
-      ),
-      ParamFieldDef(
-        'startY',
-        '起点Y',
-        ParamType.int,
-        defaultValue: 300,
         visibleWhen: const {
           'action': {'swipe'},
         },

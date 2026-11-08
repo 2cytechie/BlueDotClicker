@@ -184,7 +184,7 @@ final scriptVariablesProvider =
 class PickTarget {
   final String nodeId;
 
-  /// 坐标写入的参数键（如 'x'/'y'、'startX'/'startY'）
+  /// 坐标写入的参数键（如 'x'/'y'、'endX'/'endY'）
   final String keyX, keyY;
 
   /// 按键类型写入的参数键（'button'，仅 click/doubleClick）；null = 不写按键

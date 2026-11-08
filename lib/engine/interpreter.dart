@@ -448,8 +448,9 @@ class BlueprintInterpreter {
         }
       case 'swipe':
         {
-          final x1 = await _mouseCoord(script, n, 'startX');
-          final y1 = await _mouseCoord(script, n, 'startY');
+          // 拖拽起点复用 x/y 数据输入（与单击等动作共享同一组坐标）
+          final x1 = await _mouseCoord(script, n, 'x');
+          final y1 = await _mouseCoord(script, n, 'y');
           final (x2, y2) = await _swipeEnd(script, n, x1, y1);
           final dur = (n.params['durationMs'] as num?)?.toInt() ?? 300;
           await automation.swipe(

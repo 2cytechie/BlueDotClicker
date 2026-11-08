@@ -163,6 +163,36 @@ void main() {
       expect(p.containsKey('rw'), isFalse);
     });
 
+    test('旧鼠标拖拽节点的起点迁移到 x/y（起点复用 X/Y）', () {
+      final s = BlueprintScript.fromJson({
+        'name': '旧拖拽',
+        'nodes': [
+          {
+            'id': 'm1',
+            'type': 'mouse',
+            'x': 0.0,
+            'y': 0.0,
+            'params': {
+              'action': 'swipe',
+              'mode': 'coords',
+              'startX': 400,
+              'startY': 300,
+              'endX': 600,
+              'endY': 300,
+            },
+          },
+        ],
+        'edges': [],
+      });
+      final p = s.nodes['m1']!.params;
+      expect(p['x'], 400);
+      expect(p['y'], 300);
+      expect(p['endX'], 600);
+      expect(p['endY'], 300);
+      expect(p.containsKey('startX'), isFalse);
+      expect(p.containsKey('startY'), isFalse);
+    });
+
     test('删除节点时级联删除连接', () {
       final s = BlueprintScript(name: 's');
       s.nodes['a'] = BPNode(id: 'a', type: 'start');
