@@ -34,6 +34,8 @@ bool compareValues(Object? left, Object? right, String op) {
   switch (op) {
     case 'contains':
       return l.toString().contains(r.toString());
+    case 'notContains':
+      return !l.toString().contains(r.toString());
     case '==':
       return _eq(l, r);
     case '!=':

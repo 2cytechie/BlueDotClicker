@@ -280,17 +280,17 @@ final coordinatePickProvider =
 class LocatePointDef {
   final String keyX, keyY;
 
-  /// 图标填充色（0xAARRGGBB；滑动起点/终点用不同色，与录制页一致）
+  /// 图标填充色（0xAARRGGBB；拖拽起点/终点用不同色，与录制页一致）
   final int color;
   const LocatePointDef(this.keyX, this.keyY, this.color);
 }
 
-/// 一次屏幕定位目标：同一节点上的一组点（滑动为起点+终点，两点自动连线）
+/// 一次屏幕定位目标：同一节点上的一组点（拖拽为起点+终点，两点自动连线）
 class ScreenLocateTarget {
   final String nodeId;
   final List<LocatePointDef> points;
 
-  /// 悬浮条提示（「位置」「滑动起点」…）
+  /// 悬浮条提示（「位置」「拖拽起点」…）
   final String label;
   const ScreenLocateTarget({
     required this.nodeId,
@@ -320,7 +320,7 @@ class ScreenLocateState {
 
 /// 屏幕定位：在屏幕上显示可拖拽的定位图标（复用录制页的 ScreenMarkerService），
 /// 拖拽结束把新坐标写回节点；节点参数变化（输入框/撤销）时同步图标位置。
-/// 目标节点删除、切换选中、参数不再适用（如动作从滑动改为单击）时自动关闭。
+/// 目标节点删除、切换选中、参数不再适用（如动作从拖拽改为单击）时自动关闭。
 class ScreenLocateNotifier extends Notifier<ScreenLocateState> {
   /// provider 被销毁后（离开编辑器页）异步回调不得再写 state
   bool _alive = true;
@@ -474,21 +474,21 @@ final screenLocateProvider =
 
 // ---- 全局区域框选 ----
 
-/// 一次区域框选目标：确认后把矩形写回哪个节点的哪些区域参数
+/// 一次区域框选目标：确认后把矩形换算为两个角点写回节点参数
 class RegionPickTarget {
   final String nodeId;
 
-  /// 区域参数键（'rx'/'ry'/'rw'/'rh'）
-  final String keyX, keyY, keyW, keyH;
+  /// 区域参数键（'left'/'top'/'right'/'bottom'）
+  final String keyLeft, keyTop, keyRight, keyBottom;
 
   /// 悬浮提示标签（「框选区域」）
   final String label;
   const RegionPickTarget({
     required this.nodeId,
-    required this.keyX,
-    required this.keyY,
-    required this.keyW,
-    required this.keyH,
+    required this.keyLeft,
+    required this.keyTop,
+    required this.keyRight,
+    required this.keyBottom,
     required this.label,
   });
 }
@@ -518,7 +518,7 @@ class RegionPickNotifier extends Notifier<RegionPickState> {
     if (_alive) state = s;
   }
 
-  /// 开始框选；确认后矩形经 [controller] 写回节点（rx/ry/rw/rh），
+  /// 开始框选；确认后把矩形换算为两角点写回节点（left/top/right/bottom），
   /// 并自动勾选「仅指定区域」（useRegion=true），支持撤销/重做。
   Future<void> start({
     required fl.NodeEditorController controller,
@@ -535,10 +535,10 @@ class RegionPickNotifier extends Notifier<RegionPickState> {
       controller.updateNode(
         target.nodeId,
         (n) => n.withData({
-          target.keyX: result.x,
-          target.keyY: result.y,
-          target.keyW: result.w,
-          target.keyH: result.h,
+          target.keyLeft: result.x,
+          target.keyTop: result.y,
+          target.keyRight: result.x + result.w,
+          target.keyBottom: result.y + result.h,
           'useRegion': true,
         }),
       );

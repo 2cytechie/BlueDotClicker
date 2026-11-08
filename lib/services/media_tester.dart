@@ -2,6 +2,7 @@ import 'dart:io';
 
 import '../platform/platform_automation.dart';
 import '../platform/win32/user32.dart' as u32;
+import 'ocr_target.dart';
 import 'recognition.dart';
 import 'windows_recognition.dart' show loadTemplateFile;
 
@@ -57,17 +58,24 @@ class MediaTester {
       );
     }
     final region = _region(data);
+    if (region.enabled && !region.valid) {
+      return const MediaTestResult(
+        ok: false,
+        title: '区域无效',
+        lines: ['区域的宽或高为 0，请检查左上角/右下角坐标'],
+      );
+    }
     final hwnd = _minimizeSelf();
     try {
       // 等窗口离开屏幕后再采集
       if (hwnd != 0) await Future<void>.delayed(const Duration(milliseconds: 350));
       switch (type) {
         case 'screenshot':
-          return await _testScreenshot(region);
+          return await _testScreenshot(region.rect);
         case 'ocr':
-          return await _testOcr(data, region);
+          return await _testOcr(data, region.rect);
         case 'imageMatch':
-          return await _testImageMatch(data, region);
+          return await _testImageMatch(data, region.rect);
         default:
           return MediaTestResult(
             ok: false,
@@ -98,17 +106,42 @@ class MediaTester {
   }
 
   Future<MediaTestResult> _testOcr(Map<String, Object?> data, RectPx? region) async {
-    final (img, _, _) = await _capture(region);
-    final text = (await _recognition.recognizeText(img)).text;
-    final varName = ((data['resultVar'] as String?) ?? '').trim();
+    final (img, imgX, imgY) = await _capture(region);
+    final res = await _recognition.recognizeText(img);
+    final target = ((data['targetText'] as String?) ?? '').toString();
+    var found = res.text.isNotEmpty;
+    var cx = region != null ? region.x + region.w ~/ 2 : imgX + img.width ~/ 2;
+    var cy = region != null ? region.y + region.h ~/ 2 : imgY + img.height ~/ 2;
+    if (target.trim().isNotEmpty) {
+      final hit = findOcrTarget(res.words, target);
+      if (hit != null) {
+        found = true;
+        cx = imgX + hit.x;
+        cy = imgY + hit.y;
+      } else if (res.words.isEmpty &&
+          normalizeOcrText(res.text).contains(normalizeOcrText(target))) {
+        found = true;
+      } else {
+        found = false;
+        cx = -1;
+        cy = -1;
+      }
+    }
     return MediaTestResult(
-      ok: text.isNotEmpty,
-      title: text.isEmpty ? '未识别到文本' : '识别成功',
+      ok: found,
+      title: target.trim().isEmpty
+          ? (res.text.isEmpty ? '未识别到文本' : '识别成功')
+          : (found ? '命中目标文本' : '未命中目标文本'),
       lines: [
-        '文本内容：${text.isEmpty ? '(空)' : text}',
-        '文本长度 ${text.length}',
+        '文本内容：${res.text.isEmpty ? '(空)' : res.text}',
+        '文本长度 ${res.text.length}',
         '来源图像 ${img.width} × ${img.height}',
-        if (varName.isNotEmpty) '运行时将写入变量 $varName',
+        if (target.trim().isNotEmpty) ...[
+          '目标文本：$target',
+          '是否命中：$found',
+          found ? '目标坐标：($cx, $cy)' : '目标坐标：(-1, -1)',
+        ] else
+          '区域中心：($cx, $cy)',
       ],
       preview: img,
     );
@@ -173,12 +206,6 @@ class MediaTester {
     if (hwnd != 0) u32.restoreWindow(hwnd);
   }
 
-  int _int(Map<String, Object?> data, String key, int fallback) {
-    final v = data[key];
-    if (v is num) return v.toInt();
-    return int.tryParse('$v') ?? fallback;
-  }
-
   double _double(Map<String, Object?> data, String key, double fallback) {
     final v = data[key];
     if (v is num) return v.toDouble();
@@ -186,13 +213,8 @@ class MediaTester {
   }
 
   /// 区域参数：useRegion 非 true 时视为全屏（与解释器取值语义一致）
-  RectPx? _region(Map<String, Object?> data) {
-    if (data['useRegion'] != true) return null;
-    return RectPx(
-      _int(data, 'rx', 0),
-      _int(data, 'ry', 0),
-      _int(data, 'rw', 400),
-      _int(data, 'rh', 300),
-    );
+  RegionParse _region(Map<String, Object?> data) {
+    if (data['useRegion'] != true) return const RegionParse.disabled();
+    return resolveRegion(data);
   }
 }

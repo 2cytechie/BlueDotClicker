@@ -37,6 +37,49 @@ class RectPx {
   const RectPx(this.x, this.y, this.w, this.h);
 }
 
+/// 媒体节点两角点区域解析结果。
+/// [enabled] 为 false 表示未勾选「仅指定区域」；[valid] 为 false 表示宽或高为 0。
+class RegionParse {
+  final bool enabled;
+  final bool valid;
+  final RectPx? rect;
+  const RegionParse.disabled()
+      : enabled = false,
+        valid = false,
+        rect = null;
+  const RegionParse.valid(RectPx this.rect)
+      : enabled = true,
+        valid = true;
+  const RegionParse.invalid()
+      : enabled = true,
+        valid = false,
+        rect = null;
+}
+
+/// 解析 `useRegion` + `left/top/right/bottom` 参数。
+/// 两点顺序颠倒时按 min/max 组成矩形；右下角不含边界。
+RegionParse resolveRegion(Map<String, Object?> params) {
+  if (params['useRegion'] != true) return const RegionParse.disabled();
+  int intOf(String key, int fallback) {
+    final v = params[key];
+    if (v is num) return v.toInt();
+    return int.tryParse('${v ?? ''}') ?? fallback;
+  }
+
+  final l = intOf('left', 0);
+  final t = intOf('top', 0);
+  final r = intOf('right', 400);
+  final b = intOf('bottom', 300);
+  final left = l < r ? l : r;
+  final top = t < b ? t : b;
+  final right = l < r ? r : l;
+  final bottom = t < b ? b : t;
+  final w = right - left;
+  final h = bottom - top;
+  if (w <= 0 || h <= 0) return const RegionParse.invalid();
+  return RegionParse.valid(RectPx(left, top, w, h));
+}
+
 /// 鼠标按键
 enum MouseButton { left, right, middle }
 
@@ -49,14 +92,31 @@ abstract interface class PlatformAutomation {
   /// 屏幕物理分辨率
   (int, int) get screenSize;
 
-  Future<void> moveMouse(int x, int y);
+  /// 移动到屏幕坐标；[durationMs] > 0 时沿缓动曲线分步移动。
+  /// [cancelled] 在每步之间调用，返回 true 时立即停止移动。
+  Future<void> moveMouse(
+    int x,
+    int y, {
+    int durationMs = 0,
+    bool Function()? cancelled,
+  });
   Future<void> click(
     int x,
     int y, {
     MouseButton button = MouseButton.left,
     int count = 1,
   });
-  Future<void> swipe(int x1, int y1, int x2, int y2, {int durationMs = 300});
+
+  /// 按住鼠标键从起点拖拽到终点；[cancelled] 在每步之间调用。
+  Future<void> swipe(
+    int x1,
+    int y1,
+    int x2,
+    int y2, {
+    int durationMs = 300,
+    MouseButton button = MouseButton.left,
+    bool Function()? cancelled,
+  });
   Future<void> longPress(
     int x,
     int y, {
@@ -100,7 +160,12 @@ class UnsupportedPlatformAutomation implements PlatformAutomation {
   @override
   (int, int) get screenSize => (1280, 720);
   @override
-  Future<void> moveMouse(int x, int y) => _deny();
+  Future<void> moveMouse(
+    int x,
+    int y, {
+    int durationMs = 0,
+    bool Function()? cancelled,
+  }) => _deny();
   @override
   Future<void> click(
     int x,
@@ -109,8 +174,15 @@ class UnsupportedPlatformAutomation implements PlatformAutomation {
     int count = 1,
   }) => _deny();
   @override
-  Future<void> swipe(int x1, int y1, int x2, int y2, {int durationMs = 300}) =>
-      _deny();
+  Future<void> swipe(
+    int x1,
+    int y1,
+    int x2,
+    int y2, {
+    int durationMs = 300,
+    MouseButton button = MouseButton.left,
+    bool Function()? cancelled,
+  }) => _deny();
   @override
   Future<void> longPress(
     int x,

@@ -131,7 +131,7 @@ void main() {
       controller: controller,
       target: xyTarget(),
     );
-    // 切换为滑动：x/y 不再是可见参数（改为起点/终点）
+    // 切换为拖拽：x/y 不再是可见参数（改为起点/终点）
     controller.updateNode('m1', (n) => n.withData(const {'action': 'swipe'}));
 
     expect(container.read(screenLocateProvider).active, isFalse);
@@ -151,7 +151,7 @@ void main() {
     expect(marker.points.single.y, 600);
   });
 
-  test('滑动定位拖动终点只回写 endX/endY', () {
+  test('拖拽定位拖动终点只回写 endX/endY', () {
     controller.updateNode(
       'm1',
       (n) => n.withData(const {
@@ -169,7 +169,7 @@ void main() {
       controller: controller,
       target: const ScreenLocateTarget(
         nodeId: 'm1',
-        label: '滑动起点',
+        label: '拖拽起点',
         points: [
           LocatePointDef('startX', 'startY', 0xFF658AE4),
           LocatePointDef('endX', 'endY', 0xFF3FA0D6),

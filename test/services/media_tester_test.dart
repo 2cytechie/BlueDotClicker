@@ -34,11 +34,24 @@ class FakeAutomation implements PlatformAutomation {
   }
 
   @override
-  Future<void> moveMouse(int x, int y) async {}
+  Future<void> moveMouse(
+    int x,
+    int y, {
+    int durationMs = 0,
+    bool Function()? cancelled,
+  }) async {}
   @override
   Future<void> click(int x, int y, {MouseButton button = MouseButton.left, int count = 1}) async {}
   @override
-  Future<void> swipe(int x1, int y1, int x2, int y2, {int durationMs = 300}) async {}
+  Future<void> swipe(
+    int x1,
+    int y1,
+    int x2,
+    int y2, {
+    int durationMs = 300,
+    MouseButton button = MouseButton.left,
+    bool Function()? cancelled,
+  }) async {}
   @override
   Future<void> longPress(int x, int y, {int durationMs = 800, MouseButton button = MouseButton.left}) async {}
   @override
@@ -96,11 +109,13 @@ void main() {
       expect(r.marker, isNull);
     });
 
-    test('文字识别：识别文本进入结果', () async {
-      final r = await _tester().runTest('ocr', const {'resultVar': 'ocrText'});
+    test('文字识别：识别文本进入结果，目标文本回显命中状态', () async {
+      final r = await _tester().runTest('ocr', const {'targetText': 'hello'});
       expect(r.ok, isTrue);
       expect(r.lines.join(), contains('hello'));
-      expect(r.lines.join(), contains('运行时将写入变量 ocrText'));
+      expect(r.lines.join(), contains('目标文本：hello'));
+      expect(r.lines.join(), contains('是否命中：true'));
+      expect(r.lines.join(), isNot(contains('运行时将写入变量')));
       expect(r.preview, isNotNull);
     });
 
@@ -130,10 +145,10 @@ void main() {
       final r = await _tester(automation: auto).runTest('imageMatch', const {
         'templatePath': 'C:/tpl.png',
         'useRegion': true,
-        'rx': 10,
-        'ry': 10,
-        'rw': 50,
-        'rh': 40,
+        'left': 10,
+        'top': 10,
+        'right': 60,
+        'bottom': 50,
       });
       expect(auto.lastRegion, isNotNull);
       expect(auto.lastRegion!.x, 10);
@@ -149,10 +164,10 @@ void main() {
       final r = await _tester(automation: auto).runTest('imageMatch', const {
         'templatePath': 'C:/tpl.png',
         'useRegion': true,
-        'rx': -500,
-        'ry': 100,
-        'rw': 50,
-        'rh': 40,
+        'left': -500,
+        'top': 100,
+        'right': -450,
+        'bottom': 140,
       });
       expect(auto.lastRegion!.x, -500);
       expect(r.preview!.width, 50);

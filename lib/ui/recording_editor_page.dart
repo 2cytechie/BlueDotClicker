@@ -346,7 +346,7 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
     _removeAction(_expandedIndex);
   }
 
-  /// 方向键微调展开动作的坐标（步长 1，Shift 步长 10）；滑动则整体平移
+  /// 方向键微调展开动作的坐标（步长 1，Shift 步长 10）；拖拽则整体平移
   void _nudgeExpanded(int dx, int dy, {int step = 1}) {
     if (_focusInEditable() || _expandedIndex < 0) return;
     final i = _expandedIndex;
@@ -518,7 +518,7 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
               ),
               for (final entry in const {
                 'RecClick': ('点击', Icons.mouse_rounded, AppColors.peacock),
-                'RecSwipe': ('滑动', Icons.swipe_rounded, AppColors.nodeMedia),
+                'RecSwipe': ('拖拽', Icons.swipe_rounded, AppColors.nodeMedia),
                 'RecLongPress': ('长按', Icons.timer_rounded, AppColors.danger),
                 'RecScroll': (
                   '滚轮',
@@ -771,7 +771,7 @@ class _ActionTile extends StatelessWidget {
 
   static (Color, String, IconData) _typeMeta(RecordedAction a) => switch (a) {
     RecClick() => (AppColors.peacock, '点击', Icons.mouse_rounded),
-    RecSwipe() => (AppColors.nodeMedia, '滑动', Icons.swipe_rounded),
+    RecSwipe() => (AppColors.nodeMedia, '拖拽', Icons.swipe_rounded),
     RecLongPress() => (AppColors.danger, '长按', Icons.timer_rounded),
     RecScroll() => (AppColors.nodeScript, '滚轮', Icons.swap_vert_rounded),
     RecKey() => (AppColors.nodeData, '按键', Icons.keyboard_rounded),

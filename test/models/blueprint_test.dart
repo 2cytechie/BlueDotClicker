@@ -134,6 +134,35 @@ void main() {
       expect(restored.name, '新名称');
     });
 
+    test('旧媒体节点区域参数 rx/ry/rw/rh 加载时换算为两角点', () {
+      final s = BlueprintScript.fromJson({
+        'name': '旧区域',
+        'nodes': [
+          {
+            'id': 'o1',
+            'type': 'ocr',
+            'x': 0.0,
+            'y': 0.0,
+            'params': {
+              'useRegion': true,
+              'rx': 100,
+              'ry': 200,
+              'rw': 300,
+              'rh': 400,
+            },
+          },
+        ],
+        'edges': [],
+      });
+      final p = s.nodes['o1']!.params;
+      expect(p['left'], 100);
+      expect(p['top'], 200);
+      expect(p['right'], 400);
+      expect(p['bottom'], 600);
+      expect(p.containsKey('rx'), isFalse);
+      expect(p.containsKey('rw'), isFalse);
+    });
+
     test('删除节点时级联删除连接', () {
       final s = BlueprintScript(name: 's');
       s.nodes['a'] = BPNode(id: 'a', type: 'start');

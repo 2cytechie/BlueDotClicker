@@ -1,9 +1,14 @@
 import '../models/blueprint.dart';
 
-/// 内置示例脚本：开始 → 设置变量 → 循环(3次){ 延时 → 点击 → 设置变量 } → 结束
+/// 内置示例脚本：条件循环计数器
 ///
-/// 演示脚本类/逻辑类/数据类节点与执行流连线的组织方式，
-/// 不依赖图像识别，安全可跑。
+/// 开始 → 设置变量(count=0)
+///      → 循环（count < 10）
+///           ├─ 真 → 加法(count + 1) → 设置变量(count) → 延时 → 循环.in
+///           └─ 假 → 结束
+///
+/// 演示条件循环、纯数据节点（获取变量）、加法与数据边连线，
+/// 不依赖图像识别与鼠标操作，安全可跑。
 BlueprintScript buildDemoScript() {
   final nodes = <String, BPNode>{
     'demo_start': BPNode(id: 'demo_start', type: 'start', x: 80, y: 60),
@@ -12,35 +17,47 @@ BlueprintScript buildDemoScript() {
       type: 'setVar',
       x: 80,
       y: 200,
-      params: {'name': 'myVar', 'const': '0'},
+      params: {'name': 'count', 'const': '0'},
     ),
     'demo_loop': BPNode(
       id: 'demo_loop',
       type: 'loop',
       x: 80,
       y: 340,
-      params: {'count': 3},
+      params: {
+        'op': '<',
+        'leftConst': '0',
+        'rightConst': '10',
+        'maxIterations': 0,
+      },
+    ),
+    'demo_getvar': BPNode(
+      id: 'demo_getvar',
+      type: 'getVar',
+      x: 80,
+      y: 500,
+      params: {'name': 'count'},
+    ),
+    'demo_add': BPNode(
+      id: 'demo_add',
+      type: 'add',
+      x: 340,
+      y: 480,
+      params: {'a': 0, 'b': 1},
+    ),
+    'demo_setvar2': BPNode(
+      id: 'demo_setvar2',
+      type: 'setVar',
+      x: 340,
+      y: 620,
+      params: {'name': 'count', 'const': ''},
     ),
     'demo_delay': BPNode(
       id: 'demo_delay',
       type: 'delay',
       x: 340,
-      y: 480,
-      params: {'ms': 500},
-    ),
-    'demo_click': BPNode(
-      id: 'demo_click',
-      type: 'mouse',
-      x: 340,
-      y: 620,
-      params: {'action': 'click', 'x': 500, 'y': 400, 'button': 'left'},
-    ),
-    'demo_setvar2': BPNode(
-      id: 'demo_setvar2',
-      type: 'setVar',
-      x: 600,
       y: 760,
-      params: {'name': 'myVar', 'const': 'step'},
+      params: {'ms': 100},
     ),
   };
 
@@ -54,40 +71,61 @@ BlueprintScript buildDemoScript() {
     'demo_e2': BPEdge(
       id: 'demo_e2',
       from: const PortRef(nodeId: 'demo_setvar1', port: 'out'),
-      to: const PortRef(nodeId: 'demo_loop', port: 'enter'),
+      to: const PortRef(nodeId: 'demo_loop', port: 'in'),
       kind: EdgeKind.exec,
     ),
+    // 条件成立 → 循环体：加法 → 设置变量 → 延时
     'demo_e3': BPEdge(
       id: 'demo_e3',
-      from: const PortRef(nodeId: 'demo_loop', port: 'body'),
-      to: const PortRef(nodeId: 'demo_delay', port: 'in'),
+      from: const PortRef(nodeId: 'demo_loop', port: 'true'),
+      to: const PortRef(nodeId: 'demo_add', port: 'in'),
       kind: EdgeKind.exec,
     ),
     'demo_e4': BPEdge(
       id: 'demo_e4',
-      from: const PortRef(nodeId: 'demo_delay', port: 'out'),
-      to: const PortRef(nodeId: 'demo_click', port: 'in'),
+      from: const PortRef(nodeId: 'demo_add', port: 'out'),
+      to: const PortRef(nodeId: 'demo_setvar2', port: 'in'),
       kind: EdgeKind.exec,
     ),
     'demo_e5': BPEdge(
       id: 'demo_e5',
-      from: const PortRef(nodeId: 'demo_click', port: 'out'),
-      to: const PortRef(nodeId: 'demo_setvar2', port: 'in'),
+      from: const PortRef(nodeId: 'demo_setvar2', port: 'out'),
+      to: const PortRef(nodeId: 'demo_delay', port: 'in'),
       kind: EdgeKind.exec,
     ),
-    // 循环体最后节点连回 continue 输入，形成闭环
+    // 循环体末尾连回 in，形成闭环
     'demo_e6': BPEdge(
       id: 'demo_e6',
-      from: const PortRef(nodeId: 'demo_setvar2', port: 'out'),
-      to: const PortRef(nodeId: 'demo_loop', port: 'continue'),
+      from: const PortRef(nodeId: 'demo_delay', port: 'out'),
+      to: const PortRef(nodeId: 'demo_loop', port: 'in'),
       kind: EdgeKind.exec,
+    ),
+    // 加法 A ← 获取变量(count)；结果 ← 加法.result
+    'demo_d1': BPEdge(
+      id: 'demo_d1',
+      from: const PortRef(nodeId: 'demo_getvar', port: 'value'),
+      to: const PortRef(nodeId: 'demo_add', port: 'a'),
+      kind: EdgeKind.data,
+    ),
+    'demo_d2': BPEdge(
+      id: 'demo_d2',
+      from: const PortRef(nodeId: 'demo_add', port: 'result'),
+      to: const PortRef(nodeId: 'demo_setvar2', port: 'value'),
+      kind: EdgeKind.data,
+    ),
+    // 循环左值读循环体内刚写入的新值（首轮无缓存时用 leftConst=0）
+    'demo_d3': BPEdge(
+      id: 'demo_d3',
+      from: const PortRef(nodeId: 'demo_setvar2', port: 'valueOut'),
+      to: const PortRef(nodeId: 'demo_loop', port: 'left'),
+      kind: EdgeKind.data,
     ),
   };
 
   return BlueprintScript(
-    name: '示例 · 循环点击演示',
+    name: '示例 · 条件循环计数',
     nodes: nodes,
     edges: edges,
-    variables: {'myVar': '0'},
+    variables: {'count': 0},
   );
 }

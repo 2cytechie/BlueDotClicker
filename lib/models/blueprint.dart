@@ -14,7 +14,7 @@ class BPNode {
     this.x = 0,
     this.y = 0,
     Map<String, dynamic>? params,
-  }) : params = params ?? _defaultParams(type);
+  }) : params = _migrateParams(type, params ?? _defaultParams(type));
 
   NodeTypeDef get def => nodeDef(type);
   String get title => def.title;
@@ -55,6 +55,37 @@ class BPNode {
       m[f.key] = f.defaultValue;
     }
     return m;
+  }
+
+  /// 旧脚本参数迁移：媒体节点区域从 rx/ry/rw/rh 换算为两角点。
+  /// 新键已存在时以新键为准；换算后移除旧键，保存时写回新格式。
+  static Map<String, dynamic> _migrateParams(
+    String type,
+    Map<String, dynamic> params,
+  ) {
+    if (type != 'screenshot' && type != 'ocr' && type != 'imageMatch') {
+      return params;
+    }
+    const oldKeys = ['rx', 'ry', 'rw', 'rh'];
+    if (!oldKeys.any(params.containsKey)) return params;
+    int intOf(String key, int fallback) {
+      final v = params[key];
+      if (v is num) return v.toInt();
+      return int.tryParse('${v ?? ''}') ?? fallback;
+    }
+
+    final left = intOf('rx', 0);
+    final top = intOf('ry', 0);
+    final right = left + intOf('rw', 400);
+    final bottom = top + intOf('rh', 300);
+    params.putIfAbsent('left', () => left);
+    params.putIfAbsent('top', () => top);
+    params.putIfAbsent('right', () => right);
+    params.putIfAbsent('bottom', () => bottom);
+    for (final k in oldKeys) {
+      params.remove(k);
+    }
+    return params;
   }
 }
 

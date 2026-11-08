@@ -22,6 +22,9 @@ class MockAutomation implements PlatformAutomation {
   /// 最近一次采集请求的区域（验证截图节点是否传入区域参数）
   RectPx? lastRegion;
 
+  /// 全部采集请求的区域（验证多次截图的区域变化）
+  final List<RectPx?> regions = [];
+
   @override
   bool get isSupported => supported;
   @override
@@ -35,9 +38,14 @@ class MockAutomation implements PlatformAutomation {
   }
 
   @override
-  Future<void> moveMouse(int x, int y) async {
+  Future<void> moveMouse(
+    int x,
+    int y, {
+    int durationMs = 0,
+    bool Function()? cancelled,
+  }) async {
     _check();
-    calls.add('move($x,$y)');
+    calls.add(durationMs > 0 ? 'move($x,$y,$durationMs)' : 'move($x,$y)');
   }
 
   @override
@@ -47,9 +55,19 @@ class MockAutomation implements PlatformAutomation {
   }
 
   @override
-  Future<void> swipe(int x1, int y1, int x2, int y2, {int durationMs = 300}) async {
+  Future<void> swipe(
+    int x1,
+    int y1,
+    int x2,
+    int y2, {
+    int durationMs = 300,
+    MouseButton button = MouseButton.left,
+    bool Function()? cancelled,
+  }) async {
     _check();
-    calls.add('swipe($x1,$y1->$x2,$y2)');
+    calls.add(
+      'swipe($x1,$y1->$x2,$y2${button == MouseButton.left ? '' : ',${button.name}'})',
+    );
   }
 
   @override
@@ -87,6 +105,7 @@ class MockAutomation implements PlatformAutomation {
     _check();
     calls.add('capture');
     lastRegion = region;
+    regions.add(region);
     final w = region?.w ?? 100;
     final h = region?.h ?? 100;
     return ScreenCapture(
@@ -108,11 +127,12 @@ class MockAutomation implements PlatformAutomation {
 
 class MockRecognition implements RecognitionService {
   String ocrText = '测试文本';
+  List<OcrWordBox> words = const [];
   @override
   bool get isAvailable => true;
   @override
   Future<OcrResult> recognizeText(RawImage image, {int? regionX, int? regionY, int? regionW, int? regionH}) async =>
-      OcrResult(ocrText);
+      OcrResult(ocrText, words: words);
   @override
   Future<MatchResult> matchTemplate(RawImage image, RawImage template, {double threshold = 0.8}) async =>
       const MatchResult(true, 50, 60, 0.95);
@@ -188,6 +208,8 @@ void main() {
     test('compareValues 数值/字符串/包含', () {
       expect(compareValues(5, 3, '>'), isTrue);
       expect(compareValues('abc', 'b', 'contains'), isTrue);
+      expect(compareValues('abc', 'b', 'notContains'), isFalse);
+      expect(compareValues('abc', 'z', 'notContains'), isTrue);
       expect(compareValues(1, 1.0, '=='), isTrue);
       expect(compareValues(true, 1, '=='), isTrue);
       expect(compareValues('a', 'b', '<'), isTrue);
@@ -343,12 +365,14 @@ void main() {
       // found == true → 单击；否则长按
       final s = BlueprintScript(name: 'cond')..variables['found'] = true;
       s.nodes['a'] = _node('a', 'start');
-      s.nodes['cond'] = _node('cond', 'condition', {'op': '==', 'leftVar': 'found', 'rightConst': 'true'});
+      s.nodes['gv'] = _node('gv', 'getVar', {'name': 'found'});
+      s.nodes['cond'] = _node('cond', 'condition', {'op': '==', 'rightConst': 'true'});
       s.nodes['yes'] = _mouse('yes', 'click', {'x': 1, 'y': 1, 'button': 'left'});
       s.nodes['no'] = _mouse('no', 'longPress', {'x': 2, 'y': 2, 'holdMs': 1});
       s.edges['e1'] = _edge('e1', 'a', 'out', 'cond', 'in');
       s.edges['e2'] = _edge('e2', 'cond', 'true', 'yes', 'in');
       s.edges['e3'] = _edge('e3', 'cond', 'false', 'no', 'in');
+      s.edges['d1'] = _edge('d1', 'gv', 'value', 'cond', 'left', kind: EdgeKind.data);
 
       final auto = MockAutomation();
       await _run(s, auto: auto);
@@ -362,49 +386,100 @@ void main() {
       expect(auto2.calls.any((c) => c.startsWith('longPress')), isTrue);
     });
 
-    test('循环执行 N 次后完成', () async {
+    test('条件循环：真进入循环体，达到安全阀后强制走假', () async {
       final s = _build([
         _node('a', 'start'),
-        _node('loop', 'loop', {'count': 3}),
-        _node('d', 'delay', {'ms': 1}),
+        _node('loop', 'loop', {
+          'op': '==',
+          'leftConst': '1',
+          'rightConst': '1',
+          'maxIterations': 2,
+        }),
+        _mouse('body', 'click', {'x': 1, 'y': 1}),
+        _mouse('done', 'longPress', {'x': 2, 'y': 2, 'holdMs': 1}),
       ], [
-        _edge('e1', 'a', 'out', 'loop', 'enter'),
-        _edge('e2', 'loop', 'body', 'd', 'in'),
-        _edge('e3', 'd', 'out', 'loop', 'continue'),
+        _edge('e1', 'a', 'out', 'loop', 'in'),
+        _edge('e2', 'loop', 'true', 'body', 'in'),
+        _edge('e3', 'body', 'out', 'loop', 'in'),
+        _edge('e4', 'loop', 'false', 'done', 'in'),
       ]);
+      final auto = MockAutomation();
       final hooks = Hooks();
-      await _run(s, hooks: hooks);
-      final logs = hooks.logs.where((l) => l.contains('循环 → body')).length;
-      expect(logs, 3);
+      await _run(s, auto: auto, hooks: hooks);
+      expect(
+        auto.calls.where((c) => c.startsWith('click')).length,
+        2,
+        reason: 'maxIterations=2 时循环体执行两次',
+      );
+      expect(auto.calls.any((c) => c.startsWith('longPress')), isTrue,
+          reason: '达到安全阀后走假出口');
+      expect(hooks.logs.join(), contains('循环达到最大次数 2，强制结束'));
+    });
+
+    test('条件循环：首轮常量兜底，数据边更新后正确退出', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('set1', 'setVar', {'name': 'count', 'const': '0'}),
+        _node('loop', 'loop', {
+          'op': '<',
+          'leftConst': '0',
+          'rightConst': '3',
+          'maxIterations': 10,
+        }),
+        _node('get', 'getVar', {'name': 'count'}),
+        _node('add', 'add', {'a': 0, 'b': 1}),
+        _node('set2', 'setVar', {'name': 'count', 'const': ''}),
+        _mouse('done', 'click', {'x': 3, 'y': 3}),
+      ], [
+        _edge('e1', 'a', 'out', 'set1', 'in'),
+        _edge('e2', 'set1', 'out', 'loop', 'in'),
+        _edge('e3', 'loop', 'true', 'add', 'in'),
+        _edge('e4', 'add', 'out', 'set2', 'in'),
+        _edge('e5', 'set2', 'out', 'loop', 'in'),
+        _edge('e6', 'loop', 'false', 'done', 'in'),
+        _edge('d1', 'get', 'value', 'add', 'a', kind: EdgeKind.data),
+        _edge('d2', 'add', 'result', 'set2', 'value', kind: EdgeKind.data),
+        _edge('d3', 'set2', 'valueOut', 'loop', 'left', kind: EdgeKind.data),
+      ]);
+      final auto = MockAutomation();
+      final vars = await _run(s, auto: auto);
+      expect(vars['count'], 3, reason: '首轮用常量 0，之后读数据边，累计到 3');
+      expect(auto.calls, contains('click(3,3,count:1,left)'), reason: '条件为假后走假出口');
     });
 
     test('设置变量并在条件中使用', () async {
       final s = _build([
         _node('a', 'start'),
         _node('set', 'setVar', {'name': 'score', 'const': '88'}),
-        _node('cond', 'condition', {'op': '>', 'leftVar': 'score', 'rightConst': '60'}),
+        _node('cond', 'condition', {'op': '>', 'rightConst': '60'}),
         _mouse('ok', 'click', {'x': 9, 'y': 9, 'button': 'left'}),
       ], [
         _edge('e1', 'a', 'out', 'set', 'in'),
         _edge('e2', 'set', 'out', 'cond', 'in'),
         _edge('e3', 'cond', 'true', 'ok', 'in'),
+        _edge('d1', 'set', 'valueOut', 'cond', 'left', kind: EdgeKind.data),
       ]);
       final vars = await _run(s);
       expect(vars['score'], 88);
     });
 
-    test('OCR 结果写入变量', () async {
+    test('OCR 不再写变量：识别文本只从 text 输出消费', () async {
       final s = _build([
         _node('a', 'start'),
-        _node('ocr', 'ocr', {'resultVar': 'ocrText', 'useRegion': false}),
+        _node('ocr', 'ocr', {'useRegion': false}),
+        _node('copy', 'setVar', {'name': 'copyOf', 'const': ''}),
       ], [
         _edge('e1', 'a', 'out', 'ocr', 'in'),
+        _edge('e2', 'ocr', 'out', 'copy', 'in'),
+        _edge('d1', 'ocr', 'text', 'copy', 'value', kind: EdgeKind.data),
       ]);
+      s.variables['ocrText'] = 'keep';
       final vars = await _run(s);
-      expect(vars['ocrText'], '测试文本');
+      expect(vars['ocrText'], 'keep', reason: 'OCR 不再修改同名变量');
+      expect(vars['copyOf'], '测试文本');
     });
 
-    test('获取变量：输出所选变量当前值', () async {
+    test('获取变量：纯数据节点，无执行流也能读取当前值', () async {
       final s = _build([
         _node('a', 'start'),
         _node('set', 'setVar', {'name': 'count', 'const': '7'}),
@@ -412,26 +487,34 @@ void main() {
         _node('copy', 'setVar', {'name': 'copyOf', 'const': ''}),
       ], [
         _edge('e1', 'a', 'out', 'set', 'in'),
-        _edge('e2', 'set', 'out', 'get', 'in'),
-        _edge('e3', 'get', 'out', 'copy', 'in'),
+        _edge('e2', 'set', 'out', 'copy', 'in'),
         _edge('d1', 'get', 'value', 'copy', 'value', kind: EdgeKind.data),
       ]);
       final vars = await _run(s);
-      expect(vars['copyOf'], 7);
+      expect(vars['copyOf'], 7, reason: 'getVar 未接入执行流，消费时惰性读取变量');
     });
 
-    test('获取变量：变量未初始化时输出空字符串', () async {
+    test('获取变量：变量未初始化时输出空字符串并只警告一次', () async {
       final s = _build([
         _node('a', 'start'),
         _node('get', 'getVar', {'name': 'neverSet'}),
         _node('copy', 'setVar', {'name': 'copyOf', 'const': ''}),
+        _node('copy2', 'setVar', {'name': 'copyOf2', 'const': ''}),
       ], [
-        _edge('e1', 'a', 'out', 'get', 'in'),
-        _edge('e2', 'get', 'out', 'copy', 'in'),
+        _edge('e1', 'a', 'out', 'copy', 'in'),
+        _edge('e2', 'copy', 'out', 'copy2', 'in'),
         _edge('d1', 'get', 'value', 'copy', 'value', kind: EdgeKind.data),
+        _edge('d2', 'get', 'value', 'copy2', 'value', kind: EdgeKind.data),
       ]);
-      final vars = await _run(s);
+      final hooks = Hooks();
+      final vars = await _run(s, hooks: hooks);
       expect(vars['copyOf'], '');
+      expect(vars['copyOf2'], '');
+      expect(
+        hooks.logs.where((l) => l.contains('不存在')).length,
+        1,
+        reason: '同一节点每次运行只警告一次',
+      );
     });
 
     test('数据保存：文本输入保存为 .txt（含识别文本）并透传文本输出', () async {
@@ -445,7 +528,7 @@ void main() {
       SaveFileService.overrideDir(tmp);
       final s = _build([
         _node('a', 'start'),
-        _node('o', 'ocr', {'resultVar': 'ocrText', 'useRegion': false}),
+        _node('o', 'ocr', {'useRegion': false}),
         _node('save', 'saveData', {'fileName': 'note'}),
         _node('copy', 'setVar', {'name': 'savedText', 'const': ''}),
       ], [
@@ -464,7 +547,7 @@ void main() {
       // 再跑一次 → 同名加序号，不覆盖
       await _run(_build([
         _node('a', 'start'),
-        _node('o', 'ocr', {'resultVar': 'ocrText', 'useRegion': false}),
+        _node('o', 'ocr', {'useRegion': false}),
         _node('save', 'saveData', {'fileName': 'note'}),
       ], [
         _edge('e1', 'a', 'out', 'o', 'in'),
@@ -531,25 +614,40 @@ void main() {
           reason: '未保存任何文件时不应创建 save 目录');
     });
 
-    test('OCR 识别文本变量名由「识别文本」输入连接决定（覆盖参数值）', () async {
+    test('OCR 目标文本由数据输入决定（覆盖参数）', () async {
+      final recognition = MockRecognition()
+        ..ocrText = '点击 开始 游戏'
+        ..words = const [
+          OcrWordBox('点击', 0, 0, 20, 10),
+          OcrWordBox('开始', 30, 0, 20, 10),
+          OcrWordBox('游戏', 60, 0, 20, 10),
+        ];
       final s = _build([
         _node('a', 'start'),
-        _node('src', 'setVar', {'name': 'varNameHolder', 'const': 'myTarget'}),
-        _node('o', 'ocr', {'resultVar': 'ocrText', 'useRegion': false}),
+        _node('src', 'setVar', {'name': 'target', 'const': '开始'}),
+        _node('o', 'ocr', {'useRegion': false, 'targetText': '参数目标'}),
+        _node('copy', 'setVar', {'name': 'hit', 'const': ''}),
       ], [
         _edge('e1', 'a', 'out', 'src', 'in'),
         _edge('e2', 'src', 'out', 'o', 'in'),
-        _edge('d1', 'src', 'valueOut', 'o', 'resultVar', kind: EdgeKind.data),
+        _edge('e3', 'o', 'out', 'copy', 'in'),
+        _edge('d1', 'src', 'valueOut', 'o', 'targetText', kind: EdgeKind.data),
+        _edge('d2', 'o', 'found', 'copy', 'value', kind: EdgeKind.data),
       ]);
-      final vars = await _run(s);
-      expect(vars['myTarget'], '测试文本', reason: '变量名应取自输入连接而非参数');
-      expect(vars['ocrText'], isNull, reason: '参数值不再被写入');
+      final hooks = Hooks();
+      final engine = BlueprintInterpreter(
+        automation: MockAutomation(),
+        recognition: recognition,
+        hooks: hooks.engineHooks,
+      );
+      await engine.run(s);
+      expect(engine.vars['hit'], true, reason: '输入连接的目标文本优先于参数');
     });
 
-    test('OCR 是否命中输出（识别文本非空为 true）', () async {
+    test('OCR 是否命中输出（目标为空时识别文本非空为 true）', () async {
       final s = _build([
         _node('a', 'start'),
-        _node('o', 'ocr', {'resultVar': '', 'useRegion': false}),
+        _node('o', 'ocr', {'useRegion': false}),
         _node('copy', 'setVar', {'name': 'hit', 'const': ''}),
       ], [
         _edge('e1', 'a', 'out', 'o', 'in'),
@@ -564,12 +662,11 @@ void main() {
       final s = _build([
         _node('a', 'start'),
         _node('o', 'ocr', {
-          'resultVar': '',
           'useRegion': true,
-          'rx': 100,
-          'ry': 200,
-          'rw': 300,
-          'rh': 400,
+          'left': 100,
+          'top': 200,
+          'right': 400,
+          'bottom': 600,
         }),
         _node('cx', 'setVar', {'name': 'cx', 'const': ''}),
         _node('cy', 'setVar', {'name': 'cy', 'const': ''}),
@@ -585,7 +682,7 @@ void main() {
       expect(vars['cy'], 200 + 400 ~/ 2, reason: '区域坐标Y + 区域高/2');
     });
 
-    test('滑动参数解析（方向模式）与坐标模式', () async {
+    test('拖拽参数解析（方向模式）与坐标模式', () async {
       final s = _build([
         _node('a', 'start'),
         _mouse('sw', 'swipe', {
@@ -614,15 +711,91 @@ void main() {
       expect(auto.calls, contains('swipe(1,2->3,4)'));
     });
 
-    test('强制停止：无限循环可被 stop 终止', () async {
+    test('拖拽支持鼠标键与起终点数据输入', () async {
       final s = _build([
         _node('a', 'start'),
-        _node('loop', 'loop', {'count': 0}),
+        _node('sx', 'setVar', {'name': 'sx', 'const': '10'}),
+        _node('sy', 'setVar', {'name': 'sy', 'const': '20'}),
+        _node('ex', 'setVar', {'name': 'ex', 'const': '30'}),
+        _node('ey', 'setVar', {'name': 'ey', 'const': '40'}),
+        _mouse('sw', 'swipe', {
+          'mode': 'coords',
+          'startX': 1,
+          'startY': 2,
+          'endX': 3,
+          'endY': 4,
+          'durationMs': 1,
+          'button': 'right',
+        }),
+      ], [
+        _edge('e1', 'a', 'out', 'sx', 'in'),
+        _edge('e2', 'sx', 'out', 'sy', 'in'),
+        _edge('e3', 'sy', 'out', 'ex', 'in'),
+        _edge('e4', 'ex', 'out', 'ey', 'in'),
+        _edge('e5', 'ey', 'out', 'sw', 'in'),
+        _edge('d1', 'sx', 'valueOut', 'sw', 'startX', kind: EdgeKind.data),
+        _edge('d2', 'sy', 'valueOut', 'sw', 'startY', kind: EdgeKind.data),
+        _edge('d3', 'ex', 'valueOut', 'sw', 'endX', kind: EdgeKind.data),
+        _edge('d4', 'ey', 'valueOut', 'sw', 'endY', kind: EdgeKind.data),
+      ]);
+      final auto = MockAutomation();
+      final hooks = Hooks();
+      await _run(s, auto: auto, hooks: hooks);
+      expect(auto.calls, contains('swipe(10,20->30,40,right)'));
+      expect(hooks.logs.join(), contains('拖拽 (10,20) → (30,40) 1ms 右键'));
+    });
+
+    test('拖拽方向模式忽略终点数据输入', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('ex', 'setVar', {'name': 'ex', 'const': '999'}),
+        _mouse('sw', 'swipe', {
+          'mode': 'direction',
+          'startX': 100,
+          'startY': 100,
+          'angle': 0,
+          'distance': 50,
+          'durationMs': 1,
+        }),
+      ], [
+        _edge('e1', 'a', 'out', 'ex', 'in'),
+        _edge('e2', 'ex', 'out', 'sw', 'in'),
+        _edge('d1', 'ex', 'valueOut', 'sw', 'endX', kind: EdgeKind.data),
+      ]);
+      final auto = MockAutomation();
+      await _run(s, auto: auto);
+      expect(auto.calls, contains('swipe(100,100->150,100)'));
+    });
+
+    test('移动到：moveDurationMs=0 瞬移，>0 带时长分步移动', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _mouse('m1', 'move', {'x': 9, 'y': 10}),
+        _mouse('m2', 'move', {'x': 11, 'y': 12, 'moveDurationMs': 300}),
+      ], [
+        _edge('e1', 'a', 'out', 'm1', 'in'),
+        _edge('e2', 'm1', 'out', 'm2', 'in'),
+      ]);
+      final auto = MockAutomation();
+      await _run(s, auto: auto);
+      expect(auto.calls, contains('move(9,10)'));
+      expect(auto.calls, contains('move(11,12,300)'));
+    });
+
+    test('强制停止：恒真条件循环可被 stop 终止', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('loop', 'loop', {
+          'op': '==',
+          'leftConst': '1',
+          'rightConst': '1',
+          'maxIterations': 0,
+        }),
         _node('d', 'delay', {'ms': 1}),
       ], [
-        _edge('e1', 'a', 'out', 'loop', 'enter'),
-        _edge('e2', 'loop', 'body', 'd', 'in'),
-        _edge('e3', 'd', 'out', 'loop', 'continue'),
+        _edge('e1', 'a', 'out', 'loop', 'in'),
+        _edge('e2', 'loop', 'true', 'd', 'in'),
+        _edge('e3', 'd', 'out', 'loop', 'in'),
       ]);
       final hooks = Hooks();
       final automation = MockAutomation();
@@ -811,11 +984,10 @@ void main() {
         _node('a', 'start'),
         _node('o', 'ocr', {
           'useRegion': true,
-          'rx': 10,
-          'ry': 20,
-          'rw': 30,
-          'rh': 40,
-          'resultVar': 'txt',
+          'left': 10,
+          'top': 20,
+          'right': 40,
+          'bottom': 60,
         }),
         _node('vx', 'setVar', {'name': 'vx'}),
         _node('vy', 'setVar', {'name': 'vy'}),
@@ -829,6 +1001,271 @@ void main() {
       final vars = await _run(s);
       expect(vars['vx'], 10 + 30 ~/ 2, reason: '区域坐标X + 区域宽/2');
       expect(vars['vy'], 20 + 40 ~/ 2, reason: '区域坐标Y + 区域高/2');
+    });
+  });
+
+  group('OCR 目标文本命中坐标', () {
+    test('命中目标文本时 x/y 为文字包围盒中心（含图像原点）', () async {
+      final recognition = MockRecognition()
+        ..ocrText = '开始 游戏'
+        ..words = const [
+          OcrWordBox('开始', 40, 60, 20, 10),
+          OcrWordBox('游戏', 100, 200, 30, 20),
+        ];
+      final auto = MockAutomation()..captureX = 1000;
+      final s = _build([
+        _node('a', 'start'),
+        _node('o', 'ocr', {'useRegion': false, 'targetText': '开始 游'}),
+        _node('vx', 'setVar', {'name': 'vx', 'const': ''}),
+        _node('vy', 'setVar', {'name': 'vy', 'const': ''}),
+        _node('vf', 'setVar', {'name': 'vf', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'o', 'in'),
+        _edge('e2', 'o', 'out', 'vx', 'in'),
+        _edge('e3', 'vx', 'out', 'vy', 'in'),
+        _edge('e4', 'vy', 'out', 'vf', 'in'),
+        _edge('d1', 'o', 'x', 'vx', 'value', kind: EdgeKind.data),
+        _edge('d2', 'o', 'y', 'vy', 'value', kind: EdgeKind.data),
+        _edge('d3', 'o', 'found', 'vf', 'value', kind: EdgeKind.data),
+      ]);
+      final engine = BlueprintInterpreter(
+        automation: auto,
+        recognition: recognition,
+        hooks: Hooks().engineHooks,
+      );
+      await engine.run(s);
+      // 命中字符跨越两个词框：并集 (40,60)-(130,220)，中心 (85,140)，加图像原点 X=1000
+      expect(engine.vars['vf'], true);
+      expect(engine.vars['vx'], 1000 + 85);
+      expect(engine.vars['vy'], 140);
+    });
+
+    test('未命中目标文本：found=false、x/y=-1 并记录日志', () async {
+      final recognition = MockRecognition()
+        ..ocrText = '开始 游戏'
+        ..words = const [OcrWordBox('开始', 0, 0, 20, 10)];
+      final s = _build([
+        _node('a', 'start'),
+        _node('o', 'ocr', {'useRegion': false, 'targetText': '不存在'}),
+        _node('vx', 'setVar', {'name': 'vx', 'const': ''}),
+        _node('vf', 'setVar', {'name': 'vf', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'o', 'in'),
+        _edge('e2', 'o', 'out', 'vx', 'in'),
+        _edge('e3', 'vx', 'out', 'vf', 'in'),
+        _edge('d1', 'o', 'x', 'vx', 'value', kind: EdgeKind.data),
+        _edge('d2', 'o', 'found', 'vf', 'value', kind: EdgeKind.data),
+      ]);
+      final hooks = Hooks();
+      final engine = BlueprintInterpreter(
+        automation: MockAutomation(),
+        recognition: recognition,
+        hooks: hooks.engineHooks,
+      );
+      await engine.run(s);
+      expect(engine.vars['vf'], false);
+      expect(engine.vars['vx'], -1);
+      expect(hooks.logs.join(), contains('OCR 未找到目标文本「不存在」'));
+    });
+
+    test('空目标文本保持旧语义：found=识别非空、坐标=区域中心', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('o', 'ocr', {
+          'useRegion': true,
+          'left': 100,
+          'top': 200,
+          'right': 400,
+          'bottom': 600,
+        }),
+        _node('vf', 'setVar', {'name': 'vf', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'o', 'in'),
+        _edge('e2', 'o', 'out', 'vf', 'in'),
+        _edge('d1', 'o', 'found', 'vf', 'value', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s);
+      expect(vars['vf'], true);
+    });
+  });
+
+  group('加减法节点', () {
+    test('int + int 输出 int；double 结果保留小数', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('s1', 'setVar', {'name': 'x', 'const': '2'}),
+        _node('s2', 'setVar', {'name': 'y', 'const': '3'}),
+        _node('add', 'add', {'a': 0, 'b': 0}),
+        _node('copy', 'setVar', {'name': 'sum', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 's1', 'in'),
+        _edge('e2', 's1', 'out', 's2', 'in'),
+        _edge('e3', 's2', 'out', 'add', 'in'),
+        _edge('e4', 'add', 'out', 'copy', 'in'),
+        _edge('d1', 's1', 'valueOut', 'add', 'a', kind: EdgeKind.data),
+        _edge('d2', 's2', 'valueOut', 'add', 'b', kind: EdgeKind.data),
+        _edge('d3', 'add', 'result', 'copy', 'value', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s);
+      expect(vars['sum'], 5);
+      expect(vars['sum'], isA<int>());
+    });
+
+    test('减法允许负数；非数字输出 0 并打日志', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('s1', 'setVar', {'name': 'x', 'const': '1.5'}),
+        _node('s2', 'setVar', {'name': 'y', 'const': '3'}),
+        _node('sub', 'subtract', {'a': 0, 'b': 0}),
+        _node('copy', 'setVar', {'name': 'diff', 'const': ''}),
+        _node('bad', 'subtract', {'a': 0, 'b': 0}),
+        _node('copy2', 'setVar', {'name': 'badResult', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 's1', 'in'),
+        _edge('e2', 's1', 'out', 's2', 'in'),
+        _edge('e3', 's2', 'out', 'sub', 'in'),
+        _edge('e4', 'sub', 'out', 'copy', 'in'),
+        _edge('e5', 'copy', 'out', 'bad', 'in'),
+        _edge('e6', 'bad', 'out', 'copy2', 'in'),
+        _edge('d1', 's1', 'valueOut', 'sub', 'a', kind: EdgeKind.data),
+        _edge('d2', 's2', 'valueOut', 'sub', 'b', kind: EdgeKind.data),
+        _edge('d3', 'sub', 'result', 'copy', 'value', kind: EdgeKind.data),
+        _edge('d4', 's1', 'valueOut', 'bad', 'a', kind: EdgeKind.data),
+        _edge('d5', 'bad', 'result', 'copy2', 'value', kind: EdgeKind.data),
+      ]);
+      // bad 的 B 未连接，使用参数 0 → 1.5 - 0 = 1.5，不是失败
+      final vars = await _run(s);
+      expect(vars['diff'], -1.5);
+      expect(vars['badResult'], 1.5);
+    });
+
+    test('非数字操作数：结果 0 并记录失败日志', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('s1', 'setVar', {'name': 'x', 'const': 'abc'}),
+        _node('add', 'add', {'a': 0, 'b': 1}),
+        _node('copy', 'setVar', {'name': 'sum', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 's1', 'in'),
+        _edge('e2', 's1', 'out', 'add', 'in'),
+        _edge('e3', 'add', 'out', 'copy', 'in'),
+        _edge('d1', 's1', 'valueOut', 'add', 'a', kind: EdgeKind.data),
+        _edge('d2', 'add', 'result', 'copy', 'value', kind: EdgeKind.data),
+      ]);
+      final hooks = Hooks();
+      final vars = await _run(s, hooks: hooks);
+      expect(vars['sum'], 0);
+      expect(hooks.logs.join(), contains('加法失败：A 不是数字'));
+    });
+  });
+
+  group('success 输出（失败不中断执行流）', () {
+    test('图像识别：未选择模板 success=false，正常未命中仍为 true', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('im', 'imageMatch', {'templatePath': ''}),
+        _node('copy', 'setVar', {'name': 'ok', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'im', 'in'),
+        _edge('e2', 'im', 'out', 'copy', 'in'),
+        _edge('d1', 'im', 'success', 'copy', 'value', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s);
+      expect(vars['ok'], false);
+    });
+
+    test('执行录制：找不到录制 success=false 且继续执行', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('pr', 'playRecording', {'recordingId': 'ghost'}),
+        _node('copy', 'setVar', {'name': 'ok', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'pr', 'in'),
+        _edge('e2', 'pr', 'out', 'copy', 'in'),
+        _edge('d1', 'pr', 'success', 'copy', 'value', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s);
+      expect(vars['ok'], false);
+    });
+
+    test('设置变量：变量名为空 success=false', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('sv', 'setVar', {'name': '', 'const': 'x'}),
+        _node('copy', 'setVar', {'name': 'ok', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'sv', 'in'),
+        _edge('e2', 'sv', 'out', 'copy', 'in'),
+        _edge('d1', 'sv', 'success', 'copy', 'value', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s);
+      expect(vars['ok'], false);
+    });
+
+    test('截图区域四角点支持数据边；useRegion=false 时忽略坐标', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('s1', 'setVar', {'name': 'l', 'const': '10'}),
+        _node('s2', 'setVar', {'name': 't', 'const': '20'}),
+        _node('s3', 'setVar', {'name': 'r', 'const': '110'}),
+        _node('s4', 'setVar', {'name': 'b', 'const': '120'}),
+        _node('shot', 'screenshot', {
+          'useRegion': true,
+          'left': 0,
+          'top': 0,
+          'right': 400,
+          'bottom': 300,
+        }),
+        _node('shot2', 'screenshot', {'useRegion': false}),
+      ], [
+        _edge('e1', 'a', 'out', 's1', 'in'),
+        _edge('e2', 's1', 'out', 's2', 'in'),
+        _edge('e3', 's2', 'out', 's3', 'in'),
+        _edge('e4', 's3', 'out', 's4', 'in'),
+        _edge('e5', 's4', 'out', 'shot', 'in'),
+        _edge('e6', 'shot', 'out', 'shot2', 'in'),
+        _edge('d1', 's1', 'valueOut', 'shot', 'left', kind: EdgeKind.data),
+        _edge('d2', 's2', 'valueOut', 'shot', 'top', kind: EdgeKind.data),
+        _edge('d3', 's3', 'valueOut', 'shot', 'right', kind: EdgeKind.data),
+        _edge('d4', 's4', 'valueOut', 'shot', 'bottom', kind: EdgeKind.data),
+        // useRegion=false 时这些连线应被忽略
+        _edge('d5', 's1', 'valueOut', 'shot2', 'left', kind: EdgeKind.data),
+        _edge('d6', 's3', 'valueOut', 'shot2', 'right', kind: EdgeKind.data),
+      ]);
+      final auto = MockAutomation();
+      final engine = BlueprintInterpreter(
+        automation: auto,
+        recognition: MockRecognition(),
+        hooks: Hooks().engineHooks,
+      );
+      await engine.run(s);
+      expect(auto.regions.length, 2);
+      final r = auto.regions.first;
+      expect(r, isNotNull, reason: 'useRegion=true 时角点数据边应生效');
+      expect((r!.x, r.y, r.w, r.h), (10, 20, 100, 100));
+      expect(auto.regions.last, isNull, reason: 'useRegion=false 时忽略角点数据边');
+    });
+
+    test('截图：区域无效 success=false，imageOut 为空', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('shot', 'screenshot', {
+          'useRegion': true,
+          'left': 100,
+          'top': 100,
+          'right': 100,
+          'bottom': 300,
+        }),
+        _node('copy', 'setVar', {'name': 'ok', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'shot', 'in'),
+        _edge('e2', 'shot', 'out', 'copy', 'in'),
+        _edge('d1', 'shot', 'success', 'copy', 'value', kind: EdgeKind.data),
+      ]);
+      final hooks = Hooks();
+      final vars = await _run(s, hooks: hooks);
+      expect(vars['ok'], false);
+      expect(hooks.logs.join(), contains('区域无效'));
     });
   });
 
@@ -857,10 +1294,10 @@ void main() {
         _node('a', 'start'),
         _node('shot', 'screenshot', {
           'useRegion': true,
-          'rx': -1500,
-          'ry': 100,
-          'rw': 400,
-          'rh': 300,
+          'left': -1500,
+          'top': 100,
+          'right': -1100,
+          'bottom': 400,
         }),
       ], [
         _edge('e1', 'a', 'out', 'shot', 'in'),
@@ -878,12 +1315,12 @@ void main() {
         _node('a', 'start'),
         _node('shot', 'screenshot', {
           'useRegion': true,
-          'rx': -1500,
-          'ry': 100,
-          'rw': 400,
-          'rh': 300,
+          'left': -1500,
+          'top': 100,
+          'right': -1100,
+          'bottom': 400,
         }),
-        _node('o', 'ocr', {'resultVar': 'txt'}),
+        _node('o', 'ocr'),
         _node('copy', 'setVar', {'name': 'x', 'const': ''}),
       ], [
         _edge('e1', 'a', 'out', 'shot', 'in'),
@@ -901,7 +1338,7 @@ void main() {
       final auto = MockAutomation()..captureX = -1920;
       final s = _build([
         _node('a', 'start'),
-        _node('o', 'ocr', {'resultVar': 'txt', 'useRegion': false}),
+        _node('o', 'ocr', {'useRegion': false}),
         _node('copy', 'setVar', {'name': 'x', 'const': ''}),
       ], [
         _edge('e1', 'a', 'out', 'o', 'in'),

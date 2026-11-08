@@ -32,6 +32,11 @@ enum PortKind { exec, data }
 
 enum PortDir { input, output }
 
+/// 数据端口类型标签：执行流 / 图像 / 其余数据
+const String kPortTypeExec = 'exec';
+const String kPortTypeImage = 'image';
+const String kPortTypeValue = 'value';
+
 class PortDef {
   final String key;
   final PortKind kind;
@@ -40,12 +45,26 @@ class PortDef {
 
   /// 属性面板「输入端口说明」中展示的详细说明（仅需解释的输入口填写）
   final String? note;
-  const PortDef(this.key, this.kind, this.dir, this.label, {this.note});
+
+  /// 端口数据类型；两端都有类型且不同时禁止连线（null 为通配）。
+  /// 所有数据端口都必须显式标类型，否则类型校验会失效。
+  final String dataType;
+  const PortDef(
+    this.key,
+    this.kind,
+    this.dir,
+    this.label, {
+    this.note,
+    String? dataType,
+  }) : dataType = dataType ??
+            (kind == PortKind.exec ? kPortTypeExec : kPortTypeValue);
+
   Map<String, dynamic> toJson() => {
     'key': key,
     'kind': kind.name,
     'dir': dir.name,
     'label': label,
+    'dataType': dataType,
     if (note != null) 'note': note,
   };
 }
@@ -87,6 +106,10 @@ class ParamFieldDef {
   /// 空表表示始终显示。
   final Map<String, Set<String>> visibleWhen;
 
+  /// 该参数被哪个数据输入端口接管（默认与参数同名的端口）。
+  /// 连接后属性面板灰显只读、保留原值；执行时数据边优先。
+  final String? lockedByPort;
+
   const ParamFieldDef(
     this.key,
     this.label,
@@ -95,6 +118,7 @@ class ParamFieldDef {
     this.options = const [],
     this.hint,
     this.visibleWhen = const {},
+    this.lockedByPort,
   });
 
   /// [data] 应已补齐默认值（见属性面板/节点摘要的 _effectiveData）
@@ -133,17 +157,42 @@ PortDef _inExec([String key = 'in', String label = '']) =>
     PortDef(key, PortKind.exec, PortDir.input, label);
 PortDef _outExec([String key = 'out', String label = '']) =>
     PortDef(key, PortKind.exec, PortDir.output, label);
-PortDef _inData(String key, String label, {String? note}) =>
-    PortDef(key, PortKind.data, PortDir.input, label, note: note);
-PortDef _outData(String key, String label, {String? note}) =>
-    PortDef(key, PortKind.data, PortDir.output, label, note: note);
+PortDef _inData(
+  String key,
+  String label, {
+  String? note,
+  String dataType = kPortTypeValue,
+}) => PortDef(
+  key,
+  PortKind.data,
+  PortDir.input,
+  label,
+  note: note,
+  dataType: dataType,
+);
+PortDef _outData(
+  String key,
+  String label, {
+  String? note,
+  String dataType = kPortTypeValue,
+}) => PortDef(
+  key,
+  PortKind.data,
+  PortDir.output,
+  label,
+  note: note,
+  dataType: dataType,
+);
 
-const _regionFields = [
+/// 媒体节点（截图/文字识别/图像识别）共用的两角点区域字段：
+/// 宽 = right - left，高 = bottom - top；右下角不含边界。
+const _cornerFields = [
   ParamFieldDef('useRegion', '仅指定区域', ParamType.bool, defaultValue: false),
-  ParamFieldDef('rx', '区域X', ParamType.int, defaultValue: 0),
-  ParamFieldDef('ry', '区域Y', ParamType.int, defaultValue: 0),
-  ParamFieldDef('rw', '区域宽', ParamType.int, defaultValue: 400),
-  ParamFieldDef('rh', '区域高', ParamType.int, defaultValue: 300),
+  // 四个角点始终显示（便于随时框选/微调），仅在 useRegion=true 时参与执行
+  ParamFieldDef('left', '左上角X', ParamType.int, defaultValue: 0),
+  ParamFieldDef('top', '左上角Y', ParamType.int, defaultValue: 0),
+  ParamFieldDef('right', '右下角X', ParamType.int, defaultValue: 400),
+  ParamFieldDef('bottom', '右下角Y', ParamType.int, defaultValue: 300),
 ];
 
 const _buttonOptions = [
@@ -152,11 +201,23 @@ const _buttonOptions = [
   EnumOption('middle', '中键'),
 ];
 
+/// 条件判断与循环共用的比较方式（含「不包含」）
+const kCompareOptions = [
+  EnumOption('==', '等于'),
+  EnumOption('!=', '不等于'),
+  EnumOption('>', '大于'),
+  EnumOption('<', '小于'),
+  EnumOption('>=', '大于等于'),
+  EnumOption('<=', '小于等于'),
+  EnumOption('contains', '包含'),
+  EnumOption('notContains', '不包含'),
+];
+
 /// 鼠标动作（`mouse` 节点的 action 取值）
 const kMouseActions = [
   EnumOption('click', '单击'),
   EnumOption('doubleClick', '双击'),
-  EnumOption('swipe', '滑动'),
+  EnumOption('swipe', '拖拽'),
   EnumOption('longPress', '长按'),
   EnumOption('scroll', '滚轮'),
   EnumOption('move', '移动到'),
@@ -199,7 +260,7 @@ final List<NodeTypeDef> kNodeTypes = [
     category: NodeCategory.interaction,
     icon: Icons.mouse_rounded,
     description:
-        '按所选动作操作鼠标：单击/双击/滑动/长按/滚轮/移动到。'
+        '按所选动作操作鼠标：单击/双击/拖拽/长按/滚轮/移动到。'
         'X/Y 坐标可选接入上游数据（如识别结果），接入后坐标参数自动锁定。'
         '补充：滚轮滚动距离（120=一格）。滚轮水平滚动（正=右）。滚轮垂直滚动（正=上）。',
     inputs: [
@@ -213,6 +274,26 @@ final List<NodeTypeDef> kNodeTypes = [
         'y',
         'Y 坐标',
         note: '可选。连接上游数据后，本节点的 Y 坐标由输入值决定，属性面板中的「Y 坐标」参数锁定为只读；不连接时使用参数值。',
+      ),
+      _inData(
+        'startX',
+        '拖拽起点X',
+        note: '可选。仅在动作=拖拽时生效；连接后拖拽起点 X 由输入值决定，参数锁定只读。',
+      ),
+      _inData(
+        'startY',
+        '拖拽起点Y',
+        note: '可选。仅在动作=拖拽时生效；连接后拖拽起点 Y 由输入值决定，参数锁定只读。',
+      ),
+      _inData(
+        'endX',
+        '拖拽终点X',
+        note: '可选。仅在动作=拖拽且模式=起点终点时生效；方向距离模式忽略终点输入。',
+      ),
+      _inData(
+        'endY',
+        '拖拽终点Y',
+        note: '可选。仅在动作=拖拽且模式=起点终点时生效；方向距离模式忽略终点输入。',
       ),
     ],
     outputs: [_outExec()],
@@ -231,7 +312,7 @@ final List<NodeTypeDef> kNodeTypes = [
         defaultValue: 'left',
         options: _buttonOptions,
         visibleWhen: const {
-          'action': {'click', 'doubleClick', 'longPress'},
+          'action': {'click', 'doubleClick', 'longPress', 'swipe'},
         },
       ),
       ParamFieldDef(
@@ -254,7 +335,7 @@ final List<NodeTypeDef> kNodeTypes = [
       ),
       ParamFieldDef(
         'mode',
-        '滑动模式',
+        '拖拽模式',
         ParamType.enum_,
         defaultValue: 'coords',
         options: [
@@ -325,11 +406,21 @@ final List<NodeTypeDef> kNodeTypes = [
       ),
       ParamFieldDef(
         'durationMs',
-        '滑动时长(ms)',
+        '拖拽时长(ms)',
         ParamType.int,
         defaultValue: 300,
         visibleWhen: const {
           'action': {'swipe'},
+        },
+      ),
+      ParamFieldDef(
+        'moveDurationMs',
+        '移动时长(ms)',
+        ParamType.int,
+        defaultValue: 0,
+        hint: '0=瞬间移动；大于 0 时按缓动曲线平滑移动',
+        visibleWhen: const {
+          'action': {'move'},
         },
       ),
       ParamFieldDef(
@@ -413,9 +504,12 @@ final List<NodeTypeDef> kNodeTypes = [
     title: '执行录制',
     category: NodeCategory.interaction,
     icon: Icons.smart_button_rounded,
-    description: '回放选中的录制动作序列（点击/滑动/长按/滚轮/按键按录制时序依次执行）',
+    description: '回放选中的录制动作序列（点击/拖拽/长按/滚轮/按键按录制时序依次执行）',
     inputs: [_inExec()],
-    outputs: [_outExec()],
+    outputs: [
+      _outExec(),
+      _outData('success', '成功', note: '正常回放完成输出 true；未选择录制/找不到录制/被 F10 中止输出 false'),
+    ],
     params: [
       ParamFieldDef(
         'recordingId',
@@ -431,12 +525,24 @@ final List<NodeTypeDef> kNodeTypes = [
     category: NodeCategory.media,
     icon: Icons.screenshot_monitor_rounded,
     description: '截取全屏或指定区域（区域可用屏幕框选），供后续识别节点使用',
-    inputs: [_inExec()],
+    inputs: [
+      _inExec(),
+      _inData('left', '左上角X', note: '可选。仅勾选「仅指定区域」时生效；连接后对应参数锁定只读。'),
+      _inData('top', '左上角Y', note: '可选。仅勾选「仅指定区域」时生效；连接后对应参数锁定只读。'),
+      _inData('right', '右下角X', note: '可选。仅勾选「仅指定区域」时生效；右下角不含边界。'),
+      _inData('bottom', '右下角Y', note: '可选。仅勾选「仅指定区域」时生效；右下角不含边界。'),
+    ],
     outputs: [
       _outExec(),
-      _outData('imageOut', '图像', note: '截取的屏幕图像，可连接「文字识别/图像识别」的图像输入'),
+      _outData(
+        'imageOut',
+        '图像',
+        dataType: kPortTypeImage,
+        note: '截取的屏幕图像，可连接「文字识别/图像识别」的图像输入',
+      ),
+      _outData('success', '成功', note: '截屏成功输出 true；区域无效或截屏失败输出 false'),
     ],
-    params: _regionFields,
+    params: _cornerFields,
   ),
   NodeTypeDef(
     type: 'ocr',
@@ -444,38 +550,41 @@ final List<NodeTypeDef> kNodeTypes = [
     category: NodeCategory.media,
     icon: Icons.text_fields_rounded,
     description:
-        '对图像/屏幕区域进行文字识别（OCR），识别出的完整文本从「文本」输出端口连线给下游，'
-        '也可写入「识别文本」指定的变量（留空则不存；变量名可手写或由输入连接提供）；坐标输出为识别区域中心点',
+        '对图像/屏幕区域进行文字识别（OCR）。「文本」输出完整识别结果；'
+        '填写「目标文本」后，是否命中表示识别文本是否包含目标，坐标输出为目标文字的中心；'
+        '目标文本留空时坐标为识别区域中心。',
     inputs: [
       _inExec(),
       _inData(
         'image',
         '输入图像(可空)',
+        dataType: kPortTypeImage,
         note:
             '可选数据输入。连接上游「截图」节点的「图像」输出时，直接识别该图像、不再重新截屏；不连接时自动现场截屏（或截取上方设定的区域）。'
             '注意：在编辑器里点「测试识别」取不到上游图像，会现场截屏。',
       ),
       _inData(
-        'resultVar',
-        '识别文本',
-        note: '可选。连接上游文本时，识别文本写入该文本指定的变量名，属性面板中的「识别文本」参数锁定为只读；不连接时使用参数手写的变量名。',
+        'targetText',
+        '目标文本',
+        note: '可选。连接后「目标文本」参数锁定；识别文本包含该文本时「是否命中」为 true，坐标输出为目标文字中心。',
       ),
     ],
     outputs: [
       _outExec(),
       _outData('text', '文本', note: '识别出的完整文本（字符串），可连接下游节点的数据输入'),
-      _outData('found', '是否命中', note: '是否识别到文本（识别结果非空为 true），可连接「条件判断」节点的数据输入'),
-      _outData('x', '坐标X', note: '识别区域中心点的 X 坐标（区域坐标X + 区域宽 ÷ 2；未框选区域时为屏幕中心）'),
-      _outData('y', '坐标Y', note: '识别区域中心点的 Y 坐标（区域坐标Y + 区域高 ÷ 2；未框选区域时为屏幕中心）'),
+      _outData('found', '是否命中', note: '识别文本是否包含「目标文本」；目标文本为空时 = 识别文本非空'),
+      _outData('x', '坐标X', note: '目标文字中心 X；目标文本为空时为区域中心；未命中目标时为 -1'),
+      _outData('y', '坐标Y', note: '目标文字中心 Y；目标文本为空时为区域中心；未命中目标时为 -1'),
+      _outData('success', '成功', note: '正常完成识别输出 true；无可用图像或区域无效输出 false'),
     ],
     params: [
-      ..._regionFields,
+      ..._cornerFields,
       ParamFieldDef(
-        'resultVar',
-        '识别文本',
+        'targetText',
+        '目标文本',
         ParamType.string,
-        defaultValue: 'ocrText',
-        hint: '识别结果存入的变量名（留空则不存）',
+        defaultValue: '',
+        hint: '留空 = 任意文本模式（坐标为区域中心）',
       ),
     ],
   ),
@@ -492,6 +601,7 @@ final List<NodeTypeDef> kNodeTypes = [
       _inData(
         'image',
         '输入图像(可空)',
+        dataType: kPortTypeImage,
         note: '可选数据输入。连接上游图像时在该图像内匹配模板；不连接时自动现场截屏（或截取上方设定的区域）。',
       ),
     ],
@@ -501,6 +611,7 @@ final List<NodeTypeDef> kNodeTypes = [
       _outData('x', '坐标X', note: '命中区域中心在屏幕上的 X 坐标（未命中时为最佳匹配位置；区域模式时含区域偏移）'),
       _outData('y', '坐标Y', note: '命中区域中心在屏幕上的 Y 坐标（未命中时为最佳匹配位置；区域模式时含区域偏移）'),
       _outData('score', '相似度', note: '相似度得分（0.0~1.0，越接近 1 越相似）'),
+      _outData('success', '成功', note: '正常完成匹配输出 true；未选择模板/模板加载失败/无可用图像/区域无效输出 false'),
     ],
     params: [
       ParamFieldDef(
@@ -510,7 +621,7 @@ final List<NodeTypeDef> kNodeTypes = [
         defaultValue: '',
       ),
       ParamFieldDef('threshold', '相似度阈值', ParamType.double, defaultValue: 0.8),
-      ..._regionFields,
+      ..._cornerFields,
     ],
   ),
   NodeTypeDef(
@@ -530,39 +641,21 @@ final List<NodeTypeDef> kNodeTypes = [
         '比较方式',
         ParamType.enum_,
         defaultValue: '==',
-        options: [
-          EnumOption('==', '等于'),
-          EnumOption('!=', '不等于'),
-          EnumOption('>', '大于'),
-          EnumOption('<', '小于'),
-          EnumOption('>=', '大于等于'),
-          EnumOption('<=', '小于等于'),
-          EnumOption('contains', '包含'),
-        ],
-      ),
-      ParamFieldDef(
-        'leftVar',
-        '左值变量名(可空)',
-        ParamType.varName,
-        defaultValue: '',
+        options: kCompareOptions,
       ),
       ParamFieldDef(
         'leftConst',
-        '左值常量(无连接/变量时)',
+        '左值(无连接时)',
         ParamType.string,
         defaultValue: '',
-      ),
-      ParamFieldDef(
-        'rightVar',
-        '右值变量名(可空)',
-        ParamType.varName,
-        defaultValue: '',
+        lockedByPort: 'left',
       ),
       ParamFieldDef(
         'rightConst',
-        '右值常量(无连接/变量时)',
+        '右值(无连接时)',
         ParamType.string,
         defaultValue: '',
+        lockedByPort: 'right',
       ),
     ],
   ),
@@ -571,14 +664,47 @@ final List<NodeTypeDef> kNodeTypes = [
     title: '循环',
     category: NodeCategory.logic,
     icon: Icons.loop_rounded,
-    description: '循环执行 body 分支，次数为 0 表示无限循环；体内最后节点连回 continue 输入',
-    inputs: [_inExec('enter', '进入'), _inExec('continue', '体返回')],
+    description:
+        '条件循环：每次进入重新比较左右值，成立走「真（循环体）」，不成立走「假（结束循环）」；'
+        '循环体最后节点必须连回本节点输入。',
+    inputs: [
+      _inExec('in', '进入 / 循环返回'),
+      _inData('left', '左值'),
+      _inData('right', '右值'),
+    ],
     outputs: [
-      PortDef('body', PortKind.exec, PortDir.output, '循环体'),
-      PortDef('done', PortKind.exec, PortDir.output, '完成'),
+      PortDef('true', PortKind.exec, PortDir.output, '真（循环体）'),
+      PortDef('false', PortKind.exec, PortDir.output, '假（结束循环）'),
     ],
     params: [
-      ParamFieldDef('count', '循环次数(0=无限)', ParamType.int, defaultValue: 3),
+      ParamFieldDef(
+        'op',
+        '比较方式',
+        ParamType.enum_,
+        defaultValue: '==',
+        options: kCompareOptions,
+      ),
+      ParamFieldDef(
+        'leftConst',
+        '左值(无连接时)',
+        ParamType.string,
+        defaultValue: '',
+        lockedByPort: 'left',
+      ),
+      ParamFieldDef(
+        'rightConst',
+        '右值(无连接时)',
+        ParamType.string,
+        defaultValue: '',
+        lockedByPort: 'right',
+      ),
+      ParamFieldDef(
+        'maxIterations',
+        '最大循环次数(0=不限制)',
+        ParamType.int,
+        defaultValue: 0,
+        hint: '0 或负数 = 不限制；正数 = 最多进入循环体的次数',
+      ),
     ],
   ),
   NodeTypeDef(
@@ -598,10 +724,20 @@ final List<NodeTypeDef> kNodeTypes = [
     icon: Icons.calculate_rounded,
     description: '新建或修改变量（数字/字符串/布尔自动推断）',
     inputs: [_inExec(), _inData('value', '值')],
-    outputs: [_outExec(), _outData('valueOut', '值')],
+    outputs: [
+      _outExec(),
+      _outData('valueOut', '值'),
+      _outData('success', '成功', note: '变量名非空并成功写入输出 true；变量名为空输出 false'),
+    ],
     params: [
       ParamFieldDef('name', '变量名', ParamType.varName, defaultValue: 'myVar'),
-      ParamFieldDef('const', '常量值(无连接时)', ParamType.string, defaultValue: ''),
+      ParamFieldDef(
+        'const',
+        '常量值(无连接时)',
+        ParamType.string,
+        defaultValue: '',
+        lockedByPort: 'value',
+      ),
     ],
   ),
   NodeTypeDef(
@@ -610,15 +746,39 @@ final List<NodeTypeDef> kNodeTypes = [
     category: NodeCategory.data,
     icon: Icons.data_object_rounded,
     description:
-        '读取已设置变量的当前值并从「值」端口输出，可连接任意数据输入；'
+        '纯数据节点：下游消费「值」端口时读取变量当前值，不参与执行流；'
         '变量名可在属性面板下拉选择（或从节点库「变量」分类点击变量创建）',
-    // 数据端口只有输出（用户要求）；执行流端口保留以接入链路
-    inputs: [_inExec()],
+    inputs: const [],
     outputs: [
-      _outExec(),
       _outData('value', '值', note: '所选变量当前的值（数字/字符串/布尔），可连接任意数据输入端口'),
     ],
     params: [ParamFieldDef('name', '变量名', ParamType.varName, defaultValue: '')],
+  ),
+  NodeTypeDef(
+    type: 'add',
+    title: '加法',
+    category: NodeCategory.data,
+    icon: Icons.add_rounded,
+    description: '计算 A + B，结果从「结果」端口输出（整数结果输出 int）',
+    inputs: [_inExec(), _inData('a', 'A'), _inData('b', 'B')],
+    outputs: [_outExec(), _outData('result', '结果')],
+    params: [
+      ParamFieldDef('a', 'A(无连接时)', ParamType.double, defaultValue: 0),
+      ParamFieldDef('b', 'B(无连接时)', ParamType.double, defaultValue: 0),
+    ],
+  ),
+  NodeTypeDef(
+    type: 'subtract',
+    title: '减法',
+    category: NodeCategory.data,
+    icon: Icons.remove_rounded,
+    description: '计算 A − B，结果从「结果」端口输出（整数结果输出 int）',
+    inputs: [_inExec(), _inData('a', 'A'), _inData('b', 'B')],
+    outputs: [_outExec(), _outData('result', '结果')],
+    params: [
+      ParamFieldDef('a', 'A(无连接时)', ParamType.double, defaultValue: 0),
+      ParamFieldDef('b', 'B(无连接时)', ParamType.double, defaultValue: 0),
+    ],
   ),
   NodeTypeDef(
     type: 'saveData',
@@ -632,12 +792,23 @@ final List<NodeTypeDef> kNodeTypes = [
     inputs: [
       _inExec(),
       _inData('text', '文本', note: '可选。连接文本类输出（如「文字识别」的「文本」），保存为 .txt 文件'),
-      _inData('image', '图像', note: '可选。连接「截图」节点的「图像」输出，保存为 .png 图片'),
+      _inData(
+        'image',
+        '图像',
+        dataType: kPortTypeImage,
+        note: '可选。连接「截图」节点的「图像」输出，保存为 .png 图片',
+      ),
     ],
     outputs: [
       _outExec(),
       _outData('textOut', '文本', note: '透传所连接的「文本」输入数据，保存后可继续连线给下游节点'),
-      _outData('imageOut', '图像', note: '透传所连接的「图像」输入数据，保存后可继续连线给下游节点'),
+      _outData(
+        'imageOut',
+        '图像',
+        dataType: kPortTypeImage,
+        note: '透传所连接的「图像」输入数据，保存后可继续连线给下游节点',
+      ),
+      _outData('success', '成功', note: '成功保存至少一个文件输出 true；文件名为空或未连接文本/图像输入输出 false'),
     ],
     params: [
       ParamFieldDef(

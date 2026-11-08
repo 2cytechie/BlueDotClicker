@@ -12,7 +12,7 @@ BlueprintScript _sample() {
   final s = BlueprintScript(name: '桥接测试')..variables['found'] = true;
   s.nodes['a'] = BPNode(id: 'a', type: 'start', x: 10, y: 20);
   s.nodes['b'] = BPNode(id: 'b', type: 'delay', x: 220, y: 20, params: {'ms': 350});
-  s.nodes['c'] = BPNode(id: 'c', type: 'condition', x: 430, y: 20, params: {'op': '>=', 'leftVar': 'found', 'rightConst': 'true'});
+  s.nodes['c'] = BPNode(id: 'c', type: 'condition', x: 430, y: 20, params: {'op': '>=', 'leftConst': '5', 'rightConst': 'true'});
   s.edges['e1'] = BPEdge(
     id: 'e1',
     from: const PortRef(nodeId: 'a', port: 'out'),
@@ -29,10 +29,10 @@ BlueprintScript _sample() {
 }
 
 void main() {
-  test('定义注册表包含全部 13 种节点类型', () {
+  test('定义注册表包含全部 15 种节点类型', () {
     expect(blueprintNodeRegistry, isNotNull);
     // 抽查几种关键类型定义可实例化（start 无参数字段，data 允许为空）
-    for (final type in ['start', 'mouse', 'keyboard', 'playRecording', 'screenshot', 'ocr', 'imageMatch', 'condition', 'loop', 'delay', 'setVar', 'getVar', 'saveData']) {
+    for (final type in ['start', 'mouse', 'keyboard', 'playRecording', 'screenshot', 'ocr', 'imageMatch', 'condition', 'loop', 'delay', 'setVar', 'getVar', 'add', 'subtract', 'saveData']) {
       final node = blueprintNodeRegistry.instantiate(type, id: 't_$type', position: Offset.zero);
       expect(node.type, type, reason: '类型 $type 应可实例化');
       if (type != 'start') {
@@ -58,14 +58,12 @@ void main() {
       blueprintNodeRegistry.instantiate('setVar', id: 'a', position: Offset.zero),
       blueprintNodeRegistry.instantiate('setVar', id: 'b', position: const Offset(200, 0)),
       blueprintNodeRegistry.instantiate('getVar', id: 'g', position: const Offset(400, 0)),
-      blueprintNodeRegistry.instantiate('condition', id: 'cond', position: const Offset(600, 0)),
     ]);
     c.updateNode('a', (n) => n.withData({'name': 'hp'}));
     c.updateNode('b', (n) => n.withData({'name': 'hp'}));
     c.updateNode('g', (n) => n.withData({'name': ' '}));
-    c.updateNode('cond', (n) => n.withData({'leftVar': 'score', 'leftConst': ''}));
     final names = graphVarNames(c.graph);
-    expect(names, {'hp', 'score'}, reason: '去重、剔除空白名');
+    expect(names, {'hp'}, reason: '去重、剔除空白名');
   });
 
   test('已移除的节点类型不再注册，且加载时连同连线被过滤', () {
@@ -88,10 +86,28 @@ void main() {
     expect(out.edges, isEmpty);
   });
 
+  test('旧脚本 getVar 执行流连线在加载时被丢弃（纯数据节点）', () {
+    final s = BlueprintScript(name: 'getvar-legacy');
+    s.nodes['g'] = BPNode(id: 'g', type: 'getVar', params: {'name': 'hp'});
+    s.nodes['d'] = BPNode(id: 'd', type: 'delay', params: {'ms': 10});
+    s.edges['e1'] = BPEdge(
+      id: 'e1',
+      from: const PortRef(nodeId: 'g', port: 'out'),
+      to: const PortRef(nodeId: 'd', port: 'in'),
+      kind: EdgeKind.exec,
+    );
+    final graph = blueprintToGraph(s);
+    expect(graph.nodes.containsKey('g'), isTrue, reason: '节点本身保留');
+    expect(graph.connections, isEmpty, reason: 'getVar 已无执行流端口，旧连线丢弃');
+    final out = graphToBlueprint(graph, name: s.name);
+    expect(out.nodes['g']!.params['name'], 'hp');
+    expect(out.edges, isEmpty);
+  });
+
   test('端口级过滤：指向已删端口（screenshot 的 image 输入）的旧连线被丢弃', () {
     final s = BlueprintScript(name: 'legacy-port');
     s.nodes['sh'] = BPNode(id: 'sh', type: 'screenshot');
-    s.nodes['o'] = BPNode(id: 'o', type: 'ocr', params: {'resultVar': 't'});
+    s.nodes['o'] = BPNode(id: 'o', type: 'ocr');
     // 旧脚本可能存在指向 screenshot.image 输入端口的连线（该端口已被移除）
     s.edges['e1'] = BPEdge(
       id: 'e1',
@@ -139,7 +155,7 @@ void main() {
 
     final c = restored.nodes['c']!;
     expect(c.params['op'], '>=');
-    expect(c.params['leftVar'], 'found');
+    expect(c.params['leftConst'], '5');
 
     // 边端点与类型
     final e1 = restored.edges['e1']!;
@@ -152,8 +168,8 @@ void main() {
 
   test('数据边经输出端口 kind 正确识别为 data', () {
     final s = BlueprintScript(name: 'data-edge');
-    s.nodes['a'] = BPNode(id: 'a', type: 'ocr', params: {'resultVar': 'ocrText'});
-    s.nodes['b'] = BPNode(id: 'b', type: 'condition', params: {'op': 'contains', 'leftVar': '', 'rightConst': 'ok'});
+    s.nodes['a'] = BPNode(id: 'a', type: 'ocr');
+    s.nodes['b'] = BPNode(id: 'b', type: 'condition', params: {'op': 'contains', 'rightConst': 'ok'});
     // OCR 的 text 输出端口（data 类型）连到 condition 的 left 输入（data 类型）
     s.edges['d1'] = BPEdge(
       id: 'd1',
@@ -268,7 +284,7 @@ void main() {
     });
   });
 
-  group('数据输入接管参数：连接时归零', () {
+  group('数据输入接管参数：连接不改写参数值', () {
     fl.NodeEditorController mouseWithSource() {
       final c = fl.NodeEditorController(definitions: blueprintNodeRegistry);
       addTearDown(c.dispose);
@@ -279,7 +295,7 @@ void main() {
       return c;
     }
 
-    test('X 接入数据后 x 归零，未连接的 y 不受影响', () {
+    test('X 接入数据后参数原值保留，y 不受影响', () {
       final c = mouseWithSource();
       c.updateNode('m', (n) => n.withData(const {'x': -809, 'y': 428}));
 
@@ -288,37 +304,59 @@ void main() {
         const fl.PortRef('m', 'x'),
       );
       expect(id, isNotNull);
-      expect(
-        zeroParamOverriddenByInput(c, c.graph.connections[id!]!),
-        isTrue,
-      );
 
-      expect(c.graph.nodes['m']!.data['x'], 0);
+      expect(c.graph.nodes['m']!.data['x'], -809,
+          reason: '参数接管只禁用不做归零，断开后可直接复用');
       expect(c.graph.nodes['m']!.data['y'], 428);
     });
+  });
 
-    test('参数已是 0 时不产生额外写入（避免多余撤销记录）', () {
-      final c = mouseWithSource();
-      c.updateNode('m', (n) => n.withData(const {'x': 0, 'y': 428}));
-      final id = c.connect(
-        const fl.PortRef('v', 'valueOut'),
-        const fl.PortRef('m', 'x'),
+  group('端口类型校验', () {
+    fl.NodeEditorController typedController() {
+      final c = fl.NodeEditorController(definitions: blueprintNodeRegistry)
+        ..connectionValidator = blueprintConnectionValidator;
+      addTearDown(c.dispose);
+      c.addNodes([
+        blueprintNodeRegistry.instantiate('start', id: 'st', position: Offset.zero),
+        blueprintNodeRegistry.instantiate('screenshot', id: 'ss', position: const Offset(0, 100)),
+        blueprintNodeRegistry.instantiate('ocr', id: 'o1', position: const Offset(200, 100)),
+        blueprintNodeRegistry.instantiate('ocr', id: 'o2', position: const Offset(200, 200)),
+        blueprintNodeRegistry.instantiate('imageMatch', id: 'im', position: const Offset(400, 200)),
+        blueprintNodeRegistry.instantiate('mouse', id: 'm', position: const Offset(400, 100)),
+      ]);
+      return c;
+    }
+
+    test('图像输出 → 图像输入允许连接', () {
+      final c = typedController();
+      expect(
+        c.connect(const fl.PortRef('ss', 'imageOut'), const fl.PortRef('o1', 'image')),
+        isNotNull,
       );
-
-      expect(zeroParamOverriddenByInput(c, c.graph.connections[id!]!), isFalse);
     });
 
-    test('执行流端口不对应参数时不写入', () {
-      final c = mouseWithSource();
-      c.updateNode('m', (n) => n.withData(const {'x': -809}));
-      final id = c.connect(
-        const fl.PortRef('v', 'out'),
-        const fl.PortRef('m', 'in'),
+    test('图像输出 → 值输入被拒绝', () {
+      final c = typedController();
+      expect(
+        c.connect(const fl.PortRef('ss', 'imageOut'), const fl.PortRef('m', 'x')),
+        isNull,
       );
-      expect(id, isNotNull);
+    });
 
-      expect(zeroParamOverriddenByInput(c, c.graph.connections[id!]!), isFalse);
-      expect(c.graph.nodes['m']!.data['x'], -809);
+    test('文本输出 → 图像输入被拒绝', () {
+      final c = typedController();
+      expect(
+        c.connect(const fl.PortRef('o1', 'text'), const fl.PortRef('im', 'image')),
+        isNull,
+      );
+    });
+
+    test('执行流连线不受数据类型影响', () {
+      final c = typedController();
+      expect(
+        c.connect(const fl.PortRef('st', 'out'), const fl.PortRef('m', 'in')),
+        isNotNull,
+      );
     });
   });
 }

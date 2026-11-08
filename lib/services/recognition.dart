@@ -2,12 +2,27 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+/// OCR 词框：文本 + 相对输入图像的像素矩形（左上角 x/y，宽高 w/h）
+class OcrWordBox {
+  final String text;
+  final int x, y, w, h;
+  const OcrWordBox(this.text, this.x, this.y, this.w, this.h);
+}
+
 /// OCR 识别结果
 class OcrResult {
   final String text;
   final int x;
   final int y;
-  const OcrResult(this.text, {this.x = 0, this.y = 0});
+
+  /// 按 OCR 行序、行内从左到右排列的词框（可能为空：引擎不支持词框时）
+  final List<OcrWordBox> words;
+  const OcrResult(
+    this.text, {
+    this.x = 0,
+    this.y = 0,
+    this.words = const [],
+  });
 }
 
 /// 模板匹配结果

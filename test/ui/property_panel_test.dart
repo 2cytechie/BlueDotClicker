@@ -138,13 +138,13 @@ void main() {
       await pumpPanel(tester);
 
       expect(find.text('鼠标键'), findsNothing);
-      expect(find.text('滚轮水平(120=一格,正=右)'), findsOneWidget);
-      expect(find.text('滚轮垂直(120=一格,正=上)'), findsOneWidget);
+      expect(find.text('滚轮水平滚动'), findsOneWidget);
+      expect(find.text('滚轮垂直滚动'), findsOneWidget);
       expect(find.text('拾取坐标'), findsOneWidget);
       expect(find.text('屏幕定位'), findsOneWidget);
     });
 
-    testWidgets('滑动：起点/终点各一组按钮，方向模式只保留起点', (tester) async {
+    testWidgets('拖拽：起点/终点各一组按钮，方向模式只保留起点', (tester) async {
       controller.updateNode(
         'n1',
         (n) => n.withData(const {'action': 'swipe'}),
@@ -270,13 +270,15 @@ void main() {
       );
     });
 
-    testWidgets('条件判断：左值/右值各自并排一行', (tester) async {
+    testWidgets('条件判断：只保留左右常量，不再有变量名参数', (tester) async {
       addAndSelect('condition', 'c1');
       await pumpPanel(tester);
-      double dy(String t) => tester.getTopLeft(find.text(t)).dy;
-      expect(dy('左值变量名(可空)'), dy('左值常量(无连接/变量时)'));
-      expect(dy('右值变量名(可空)'), dy('右值常量(无连接/变量时)'));
-      expect(dy('左值变量名(可空)'), lessThan(dy('右值变量名(可空)')));
+      expect(find.text('左值(无连接时)'), findsOneWidget);
+      expect(find.text('右值(无连接时)'), findsOneWidget);
+      expect(find.text('左值变量名(可空)'), findsNothing);
+      expect(find.text('右值变量名(可空)'), findsNothing);
+      expect(find.widgetWithText(TextField, '左值(无连接时)'), findsOneWidget);
+      expect(find.widgetWithText(TextField, '右值(无连接时)'), findsOneWidget);
     });
 
     testWidgets('设置变量：变量名与常量并排', (tester) async {
@@ -292,7 +294,7 @@ void main() {
       );
     });
 
-    testWidgets('截图节点：端口说明只有输出图像，不含输入端口', (tester) async {
+    testWidgets('截图节点：端口说明包含区域角点输入与图像/成功输出', (tester) async {
       addAndSelect('screenshot', 's1');
       await pumpPanel(tester);
       await tester.scrollUntilVisible(
@@ -300,12 +302,14 @@ void main() {
         200,
         scrollable: find.byType(Scrollable).first,
       );
-      expect(find.text('输入'), findsNothing);
+      expect(find.text('输入'), findsOneWidget);
       expect(find.text('输出'), findsOneWidget);
       expect(
         find.text('截取的屏幕图像，可连接「文字识别/图像识别」的图像输入'),
         findsOneWidget,
       );
+      // 两角点区域输入说明
+      expect(find.textContaining('仅勾选「仅指定区域」时生效'), findsWidgets);
     });
 
     testWidgets('媒体节点框选按钮与坐标拾取按钮互不干扰', (tester) async {
@@ -378,7 +382,7 @@ void main() {
       expect(xField.enabled, isNot(isFalse));
     });
 
-    testWidgets('锁定与可编辑输入框等高，锁定态数值显示为 0', (tester) async {
+    testWidgets('锁定与可编辑输入框等高，锁定态保留并显示参数原值', (tester) async {
       controller.updateNode(
         'n1',
         (n) => n.withData(const {'x': -809, 'y': 428}),
@@ -395,25 +399,25 @@ void main() {
         editable.height,
         reason: '锁定不应把输入框撑高（suffixIcon 默认 48×48 约束所致）',
       );
-      expect(find.text('0'), findsOneWidget, reason: '锁定的坐标参数应显示 0');
-      expect(find.text('-809'), findsNothing);
+      expect(find.text('-809'), findsOneWidget,
+          reason: '锁定只禁用编辑，参数原值保留并显示');
     });
 
-    testWidgets('解除连接后锁定值恢复为参数原值', (tester) async {
+    testWidgets('解除连接后参数恢复可编辑并保留原值', (tester) async {
       controller.updateNode(
         'n1',
         (n) => n.withData(const {'x': -809, 'y': 428}),
       );
       connectSource('x');
       await pumpPanel(tester);
-      expect(find.text('0'), findsOneWidget);
+      expect(find.text('-809'), findsOneWidget);
 
       controller.removeConnections(
         controller.graph.connectionsOf('n1').map((c) => c.id).toList(),
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('-809'), findsOneWidget, reason: '解锁后显示回参数真实值');
+      expect(find.text('-809'), findsOneWidget, reason: '解锁后仍显示参数真实值');
       expect(
         find.widgetWithText(TextField, 'X 坐标'),
         findsOneWidget,
@@ -485,19 +489,19 @@ void main() {
   });
 
   group('第五轮：识别文本输入锁定与文件名截断', () {
-    testWidgets('文字识别：「识别文本」参数无变量下拉，连接输入后锁定', (tester) async {
+    testWidgets('文字识别：「目标文本」连接输入后锁定并保留原值', (tester) async {
       controller.addNode(
         blueprintNodeRegistry.instantiate('ocr', id: 'o1', position: Offset.zero),
       );
       controller.selection.selectNode('o1');
       // 未连接：参数可编辑、无下拉箭头（string 类型无已有变量建议）
       await pumpPanel(tester);
-      final field = find.widgetWithText(TextField, '识别文本');
+      final field = find.widgetWithText(TextField, '目标文本');
       expect(field, findsOneWidget);
       expect(
         tester.widget<TextField>(field).decoration?.suffixIcon,
         isNull,
-        reason: '识别文本为 string 字段，不应有已有变量下拉',
+        reason: '目标文本为 string 字段，不应有已有变量下拉',
       );
 
       // 连接上游数据 → 参数锁定只读
@@ -506,14 +510,14 @@ void main() {
       );
       final connId = controller.connect(
         fl.PortRef('src', 'valueOut'),
-        fl.PortRef('o1', 'resultVar'),
+        fl.PortRef('o1', 'targetText'),
       );
       expect(connId, isNotNull, reason: '诊断：连接应建立');
       await tester.pumpAndSettle();
 
-      expect(find.text('识别文本（锁定）'), findsOneWidget);
+      expect(find.text('目标文本（锁定）'), findsOneWidget);
       final locked = tester.widget<TextField>(
-        find.widgetWithText(TextField, '识别文本（锁定）'),
+        find.widgetWithText(TextField, '目标文本（锁定）'),
       );
       expect(locked.enabled, isFalse);
       expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);

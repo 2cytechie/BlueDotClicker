@@ -276,7 +276,7 @@ class ScreenMarkerService {
 
   int _marginPx() => ((_radiusLogic + _shadowMarginLogic) * _dpr).round();
 
-  /// 显示一组可拖拽图标；恰好 2 个点时自动画连线（滑动起终点）
+  /// 显示一组可拖拽图标；恰好 2 个点时自动画连线（拖拽起终点）
   void show(
     List<MarkerPoint> points, {
     required void Function(int index, int x, int y) onDragEnd,
@@ -450,7 +450,7 @@ class ScreenMarkerService {
     ui.Offset local(MarkerPoint p) =>
         ui.Offset((p.x - winX).toDouble(), (p.y - winY).toDouble());
 
-    // 连线（滑动起终点；两点间灰白线 + 终点方向箭头）
+    // 连线（拖拽起终点；两点间灰白线 + 终点方向箭头）
     if (_points.length == 2) {
       final a = local(_points[0]);
       final b = local(_points[1]);
@@ -464,7 +464,7 @@ class ScreenMarkerService {
         ..strokeWidth = 2.5 * dpr
         ..strokeCap = ui.StrokeCap.round
         ..isAntiAlias = true);
-      // 方向箭头：终点图标外侧指向滑动方向（距离足够时绘制）
+      // 方向箭头：终点图标外侧指向拖拽方向（距离足够时绘制）
       final delta = b - a;
       final dist = delta.distance;
       if (dist > 4 * radius) {

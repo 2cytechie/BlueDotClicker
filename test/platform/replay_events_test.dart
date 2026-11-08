@@ -16,14 +16,27 @@ class _KeyLogAutomation implements PlatformAutomation {
   @override
   (int, int) get screenSize => (1920, 1080);
   @override
-  Future<void> moveMouse(int x, int y) async {}
+  Future<void> moveMouse(
+    int x,
+    int y, {
+    int durationMs = 0,
+    bool Function()? cancelled,
+  }) async {}
   @override
   Future<void> click(int x, int y,
       {MouseButton button = MouseButton.left, int count = 1}) async {
     calls.add('click($x,$y)');
   }
   @override
-  Future<void> swipe(int x1, int y1, int x2, int y2, {int durationMs = 300}) async {}
+  Future<void> swipe(
+    int x1,
+    int y1,
+    int x2,
+    int y2, {
+    int durationMs = 300,
+    MouseButton button = MouseButton.left,
+    bool Function()? cancelled,
+  }) async {}
   @override
   Future<void> longPress(int x, int y,
       {int durationMs = 800, MouseButton button = MouseButton.left}) async {}

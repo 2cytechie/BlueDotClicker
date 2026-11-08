@@ -12,9 +12,6 @@ import '../../models/node_types.dart';
 /// - 连接：执行流边 ↔ control 端口连线，数据边 ↔ data 端口连线（端口 id 即 PortDef.key）
 /// - 端口由 NodeDefinition resolution 派生，GraphNode 无需携带 ports
 
-/// 数据端口统一类型标签；执行流端口用 'exec'（成对约束）
-const String _kExecType = 'exec';
-
 /// fl.NodePort 颜色（执行流=孔雀蓝，数据=青玉）
 Color _portColor(bool isExec) => isExec ? AppColors.execWire : AppColors.dataWire;
 
@@ -25,7 +22,7 @@ fl.NodePort _toFlPort(PortDef p) {
           id: p.key,
           label: p.label.isEmpty ? null : p.label,
           kind: isExec ? fl.PortKind.control : fl.PortKind.data,
-          dataType: isExec ? _kExecType : null,
+          dataType: p.dataType,
           color: _portColor(isExec),
           maxConnections: isExec ? 1 : (p.dir == PortDir.input ? 1 : null),
         )
@@ -33,7 +30,7 @@ fl.NodePort _toFlPort(PortDef p) {
           id: p.key,
           label: p.label.isEmpty ? null : p.label,
           kind: isExec ? fl.PortKind.control : fl.PortKind.data,
-          dataType: isExec ? _kExecType : null,
+          dataType: p.dataType,
           color: _portColor(isExec),
         );
 }
@@ -159,30 +156,6 @@ bool blueprintConnectionValidator(fl.ConnectionCheck check) {
       if (c.from == check.from) return false;
     }
   }
-  return true;
-}
-
-/// 数据输入接入后，同名节点参数不再生效（如鼠标 X/Y 坐标改由上游数据决定），
-/// 连接建立时把该参数归零——否则属性面板/节点摘要会继续显示旧的手填值。
-/// 参数本来已是 0 或端口不对应参数时不写入（返回 false）。
-bool zeroParamOverriddenByInput(
-  fl.NodeEditorController controller,
-  fl.NodeConnection connection,
-) {
-  final node = controller.graph.nodes[connection.to.nodeId];
-  if (node == null) return false;
-  final def = nodeDef(node.type);
-  final key = connection.to.portId;
-  final overridden =
-      def.inputs.any((p) => p.kind == PortKind.data && p.key == key) &&
-      def.params.any((f) => f.key == key);
-  if (!overridden) return false;
-  final current = node.data[key];
-  final isZero = current is num
-      ? current == 0
-      : int.tryParse('${current ?? ''}') == 0;
-  if (isZero) return false;
-  controller.updateNode(node.id, (n) => n.withData({key: 0}));
   return true;
 }
 

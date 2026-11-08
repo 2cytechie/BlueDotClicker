@@ -17,7 +17,7 @@ abstract interface class RecordingService {
 const int _keyScanMin = 0x08;
 const int _keyScanMax = 0xFE;
 
-/// Windows 实现：10ms 轮询 GetCursorPos/GetAsyncKeyState 合成点击/滑动/长按/按键，
+/// Windows 实现：10ms 轮询 GetCursorPos/GetAsyncKeyState 合成点击/拖拽/长按/按键，
 /// WH_MOUSE_LL 低级钩子捕获滚轮。不录制纯鼠标移动轨迹。
 class WindowsRecordingService implements RecordingService {
   WindowsRecordingService(this._automation);
@@ -382,7 +382,7 @@ String describeAction(RecordedAction a) => switch (a) {
   RecClick c =>
     '点击 (${c.x}, ${c.y}) ×${c.count}${c.button == 'right' ? ' 右键' : ''}${c.button == 'middle' ? ' 中键' : ''}',
   RecSwipe w =>
-    '滑动 (${w.x1}, ${w.y1}) → (${w.x2}, ${w.y2}) ${w.durationMs}ms',
+    '拖拽 (${w.x1}, ${w.y1}) → (${w.x2}, ${w.y2}) ${w.durationMs}ms',
   RecLongPress p => '长按 (${p.x}, ${p.y}) ${p.durationMs}ms',
   RecScroll s => _scrollText(s),
   RecKey k =>

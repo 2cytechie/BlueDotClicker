@@ -191,7 +191,7 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
             Text(
               recording
                   ? '正在录制 · 已捕获 $_liveCount 个动作，请切换到目标窗口操作'
-                  : '点击「开始录制」后，切换到目标窗口进行点击/滑动/长按/滚轮/键盘操作',
+                  : '点击「开始录制」后，切换到目标窗口进行点击/拖拽/长按/滚轮/键盘操作',
               style: const TextStyle(
                 fontSize: 13,
                 color: AppColors.inkSecondary,

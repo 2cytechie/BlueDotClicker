@@ -18,7 +18,35 @@ class WindowsAutomation implements PlatformAutomation {
   (int, int) get screenSize => (u32.screenW(), u32.screenH());
 
   @override
-  Future<void> moveMouse(int x, int y) async => u32.moveAbsolute(x, y);
+  Future<void> moveMouse(
+    int x,
+    int y, {
+    int durationMs = 0,
+    bool Function()? cancelled,
+  }) async {
+    if (durationMs <= 0) {
+      u32.moveAbsolute(x, y);
+      return;
+    }
+    final (sx, sy) = u32.cursorPos();
+    final steps = (durationMs / 12).clamp(4, 120).toInt();
+    final dt = durationMs / steps;
+    var stopped = false;
+    for (var i = 1; i <= steps; i++) {
+      if (cancelled?.call() ?? false) {
+        stopped = true;
+        break;
+      }
+      final t = i / steps;
+      final e = t * t * (3 - 2 * t);
+      u32.moveAbsolute(
+        (sx + (x - sx) * e).round(),
+        (sy + (y - sy) * e).round(),
+      );
+      await Future<void>.delayed(Duration(milliseconds: dt.round()));
+    }
+    if (!stopped) u32.moveAbsolute(x, y);
+  }
 
   @override
   Future<void> click(int x, int y, {MouseButton button = MouseButton.left, int count = 1}) async {
@@ -35,19 +63,38 @@ class WindowsAutomation implements PlatformAutomation {
   }
 
   @override
-  Future<void> swipe(int x1, int y1, int x2, int y2, {int durationMs = 300}) async {
-    final steps = (durationMs / 12).clamp(4, 120).toInt();
-    final dt = durationMs / steps;
+  Future<void> swipe(
+    int x1,
+    int y1,
+    int x2,
+    int y2, {
+    int durationMs = 300,
+    MouseButton button = MouseButton.left,
+    bool Function()? cancelled,
+  }) async {
     u32.moveAbsolute(x1, y1);
-    u32.mouseDown();
-    for (var i = 1; i <= steps; i++) {
-      final t = i / steps;
-      // 轻微缓动
-      final e = t * t * (3 - 2 * t);
-      u32.moveAbsolute((x1 + (x2 - x1) * e).round(), (y1 + (y2 - y1) * e).round());
-      await Future<void>.delayed(Duration(milliseconds: dt.round()));
+    if (cancelled?.call() ?? false) return;
+    final right = button == MouseButton.right;
+    final middle = button == MouseButton.middle;
+    u32.mouseDown(right: right, middle: middle);
+    // 按下之后无论中止还是异常都必须抬键，避免系统残留按键按下状态
+    try {
+      final steps = (durationMs / 12).clamp(4, 120).toInt();
+      final dt = durationMs / steps;
+      for (var i = 1; i <= steps; i++) {
+        if (cancelled?.call() ?? false) break;
+        final t = i / steps;
+        // 轻微缓动
+        final e = t * t * (3 - 2 * t);
+        u32.moveAbsolute(
+          (x1 + (x2 - x1) * e).round(),
+          (y1 + (y2 - y1) * e).round(),
+        );
+        await Future<void>.delayed(Duration(milliseconds: dt.round()));
+      }
+    } finally {
+      u32.mouseUp(right: right, middle: middle);
     }
-    u32.mouseUp();
   }
 
   @override

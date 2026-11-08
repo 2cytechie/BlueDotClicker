@@ -324,9 +324,6 @@ class _EditorPageState extends ConsumerState<EditorPage> {
                         // 连线常态配色：执行流白色、数据绿色
                         connectionAppearance:
                             (c, from, to) => connectionAppearanceFor(from),
-                        // 坐标等参数被数据输入接管后归零，避免保留旧的手填坐标
-                        onConnectionCreated: (c) =>
-                            zeroParamOverriddenByInput(_controller, c),
                       );
                       if (constraints.maxWidth >= 1100) {
                         return Row(

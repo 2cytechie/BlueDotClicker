@@ -19,11 +19,12 @@ Set<String> _visibleKeys(NodeTypeDef def, Map<String, Object?> overrides) =>
 
 void main() {
   group('动作收敛（删除 按住/抬起/按下/抬起）', () {
-    test('鼠标动作只剩 单击/双击/滑动/长按/滚轮/移动到', () {
+    test('鼠标动作只剩 单击/双击/拖拽/长按/滚轮/移动到', () {
       expect(
         kMouseActions.map((o) => o.value).toList(),
         ['click', 'doubleClick', 'swipe', 'longPress', 'scroll', 'move'],
       );
+      expect(mouseActionLabel('swipe'), '拖拽', reason: '枚举值不变，仅显示文案改为拖拽');
       expect(mouseActionLabel('press'), 'press'); // 旧值原样返回（不做兼容）
       expect(mouseActionLabel('release'), 'release');
     });
@@ -67,7 +68,7 @@ void main() {
       );
       expect(
         _visibleKeys(nodeDef('mouse'), {'action': 'move'}),
-        {'action', 'x', 'y'},
+        {'action', 'x', 'y', 'moveDurationMs'},
       );
       expect(
         _visibleKeys(nodeDef('mouse'), {'action': 'longPress'}),
@@ -75,14 +76,32 @@ void main() {
       );
       expect(
         _visibleKeys(nodeDef('mouse'), {'action': 'swipe'}),
-        {'action', 'mode', 'startX', 'startY', 'endX', 'endY', 'durationMs'},
+        {
+          'action',
+          'button',
+          'mode',
+          'startX',
+          'startY',
+          'endX',
+          'endY',
+          'durationMs',
+        },
       );
       expect(
         _visibleKeys(nodeDef('mouse'), {
           'action': 'swipe',
           'mode': 'direction',
         }),
-        {'action', 'mode', 'startX', 'startY', 'angle', 'distance', 'durationMs'},
+        {
+          'action',
+          'button',
+          'mode',
+          'startX',
+          'startY',
+          'angle',
+          'distance',
+          'durationMs',
+        },
       );
     });
 
@@ -98,7 +117,14 @@ void main() {
       final execIns = def.inputs.where((p) => p.kind == PortKind.exec).toList();
       expect(execIns.length, 1, reason: '执行流入口保留');
       final dataIns = def.inputs.where((p) => p.kind == PortKind.data).toList();
-      expect(dataIns.map((p) => p.key), ['x', 'y']);
+      expect(dataIns.map((p) => p.key), [
+        'x',
+        'y',
+        'startX',
+        'startY',
+        'endX',
+        'endY',
+      ]);
       expect(dataIns.every((p) => p.dir == PortDir.input), isTrue);
       // 每个数据端口都有用法说明，便于用户在端口说明区理解
       expect(dataIns.every((p) => p.note != null && p.note!.isNotEmpty), isTrue);
@@ -139,18 +165,26 @@ void main() {
       expect(imageOut.note, isNotNull);
     });
 
-    test('条件判断参数顺序：左值组相邻、右值组相邻', () {
+    test('条件判断参数只有比较方式与左右常量', () {
       final keys = nodeDef('condition').params.map((p) => p.key).toList();
-      expect(keys, ['op', 'leftVar', 'leftConst', 'rightVar', 'rightConst']);
+      expect(keys, ['op', 'leftConst', 'rightConst']);
+      expect(
+        nodeDef('condition').params.map((p) => p.label).toList(),
+        ['比较方式', '左值(无连接时)', '右值(无连接时)'],
+      );
     });
 
-    test('OCR 数据端口说明齐全，x/y 描述的是区域中心', () {
+    test('OCR 数据端口说明齐全，x/y 描述目标文字坐标', () {
       final def = nodeDef('ocr');
       final notes = [
         ...def.inputs.where((p) => p.note != null),
         ...def.outputs.where((p) => p.note != null),
       ];
-      expect(notes.length, 6, reason: '图像/识别文本 2 输入 + 文本/是否命中/坐标X/坐标Y 4 输出');
+      expect(
+        notes.length,
+        7,
+        reason: '图像/目标文本 2 输入 + 文本/是否命中/坐标X/坐标Y/成功 5 输出',
+      );
       // 执行流端口一律不写说明
       expect(
         [...def.inputs, ...def.outputs]
@@ -160,17 +194,17 @@ void main() {
       );
       final x = def.outputs.firstWhere((p) => p.key == 'x');
       final y = def.outputs.firstWhere((p) => p.key == 'y');
-      expect(x.note, contains('区域坐标X + 区域宽 ÷ 2'));
-      expect(y.note, contains('区域坐标Y + 区域高 ÷ 2'));
+      expect(x.note, contains('目标文字中心'));
+      expect(y.note, contains('目标文字中心'));
     });
 
-    test('图像识别数据端口说明 5 条，x/y 描述命中中心', () {
+    test('图像识别数据端口说明 6 条，x/y 描述命中中心', () {
       final def = nodeDef('imageMatch');
       final notes = [
         ...def.inputs.where((p) => p.note != null),
         ...def.outputs.where((p) => p.note != null),
       ];
-      expect(notes.length, 5);
+      expect(notes.length, 6);
       final x = def.outputs.firstWhere((p) => p.key == 'x');
       final y = def.outputs.firstWhere((p) => p.key == 'y');
       expect(x.note, contains('中心'));
@@ -186,22 +220,20 @@ void main() {
       expect(isKnownNodeType('saveData'), isTrue);
     });
 
-    test('获取变量：无数据输入，仅一个数据输出（value）', () {
+    test('获取变量：纯数据节点，无任何输入，仅一个数据输出（value）', () {
       final def = nodeDef('getVar');
-      expect(def.inputs.where((p) => p.kind == PortKind.data), isEmpty,
-          reason: '获取变量只有输出没有数据输入');
-      expect(def.inputs.where((p) => p.kind == PortKind.exec).length, 1);
+      expect(def.inputs, isEmpty, reason: '获取变量不参与执行流，也没有数据输入');
       final dataOuts = def.outputs.where((p) => p.kind == PortKind.data).toList();
       expect(dataOuts.map((p) => p.key), ['value']);
       expect(dataOuts.single.note, isNotNull, reason: '输出端口带用法说明');
     });
 
-    test('数据保存：文本/图像双数据输入 + 文本/图像透传输出，带说明', () {
+    test('数据保存：文本/图像双数据输入 + 文本/图像/成功输出，带说明', () {
       final def = nodeDef('saveData');
       final dataIns = def.inputs.where((p) => p.kind == PortKind.data).toList();
       expect(dataIns.map((p) => p.key), ['text', 'image']);
       final dataOuts = def.outputs.where((p) => p.kind == PortKind.data).toList();
-      expect(dataOuts.map((p) => p.key), ['textOut', 'imageOut']);
+      expect(dataOuts.map((p) => p.key), ['textOut', 'imageOut', 'success']);
       // 数据端口全部带说明（端口即文档）
       expect(
         [...dataIns, ...dataOuts].every((p) => p.note != null && p.note!.isNotEmpty),
@@ -219,37 +251,90 @@ void main() {
   });
 
   group('第五轮节点定义变更', () {
-    test('OCR：「识别文本」参数为 string（无变量下拉）、有同名数据输入、key 未变', () {
+    test('OCR：resultVar 已删除，改为「目标文本」参数与同名数据输入', () {
       final def = nodeDef('ocr');
-      final f = def.params.firstWhere((f) => f.key == 'resultVar');
-      expect(f.label, '识别文本');
+      expect(def.params.any((f) => f.key == 'resultVar'), isFalse,
+          reason: 'OCR 不再负责写变量');
+      expect(def.inputs.any((p) => p.key == 'resultVar'), isFalse);
+      final f = def.params.firstWhere((f) => f.key == 'targetText');
+      expect(f.label, '目标文本');
       expect(f.type, ParamType.string, reason: 'string 类型不出现已有变量下拉');
-      final input = def.inputs.firstWhere((p) => p.key == 'resultVar');
+      final input = def.inputs.firstWhere((p) => p.key == 'targetText');
       expect(input.kind, PortKind.data);
       expect(input.note, isNotNull, reason: '输入端口带用法说明');
     });
 
-    test('OCR 数据输出为 文本/是否命中/坐标X/坐标Y', () {
+    test('OCR 数据输出为 文本/是否命中/坐标X/坐标Y/成功', () {
       final def = nodeDef('ocr');
       final dataOuts = def.outputs.where((p) => p.kind == PortKind.data).toList();
-      expect(dataOuts.map((p) => p.key), ['text', 'found', 'x', 'y']);
+      expect(dataOuts.map((p) => p.key), ['text', 'found', 'x', 'y', 'success']);
       final found = dataOuts[1];
       expect(found.label, '是否命中');
-      expect(found.note, contains('非空为 true'));
+      expect(found.note, contains('目标文本'));
       expect(dataOuts[2].label, '坐标X');
       expect(dataOuts[3].label, '坐标Y');
+      expect(dataOuts[4].label, '成功');
     });
 
-    test('imageMatch：命中变量三参数已删除，输出为 是否命中/坐标X/坐标Y/相似度', () {
+    test('imageMatch：模板/阈值 + 两角点区域参数，输出含成功', () {
       final def = nodeDef('imageMatch');
-      expect(def.params.map((f) => f.key),
-          ['templatePath', 'threshold', 'useRegion', 'rx', 'ry', 'rw', 'rh']);
+      expect(def.params.map((f) => f.key), [
+        'templatePath',
+        'threshold',
+        'useRegion',
+        'left',
+        'top',
+        'right',
+        'bottom',
+      ]);
       final dataOuts = def.outputs.where((p) => p.kind == PortKind.data).toList();
-      expect(dataOuts.map((p) => p.key), ['found', 'x', 'y', 'score']);
+      expect(dataOuts.map((p) => p.key), ['found', 'x', 'y', 'score', 'success']);
       final x = dataOuts.firstWhere((p) => p.key == 'x');
       final y = dataOuts.firstWhere((p) => p.key == 'y');
       expect(x.label, '坐标X');
       expect(y.label, '坐标Y');
+    });
+  });
+
+  group('条件循环与算术节点', () {
+    test('循环：单执行输入 + 左右数据输入 + 真/假双输出', () {
+      final def = nodeDef('loop');
+      expect(def.inputs.where((p) => p.kind == PortKind.exec).map((p) => p.key), ['in']);
+      expect(
+        def.inputs.where((p) => p.kind == PortKind.data).map((p) => p.key),
+        ['left', 'right'],
+      );
+      expect(def.outputs.map((p) => p.key), ['true', 'false']);
+      expect(def.params.map((f) => f.key),
+          ['op', 'leftConst', 'rightConst', 'maxIterations']);
+      expect(
+        def.params.firstWhere((f) => f.key == 'op').options.map((o) => o.value),
+        contains('notContains'),
+      );
+    });
+
+    test('加法/减法：数据分类，执行流 + A/B 输入 + 结果输出', () {
+      for (final type in ['add', 'subtract']) {
+        final def = nodeDef(type);
+        expect(def.category, NodeCategory.data);
+        expect(def.inputs.map((p) => p.key), ['in', 'a', 'b']);
+        expect(def.outputs.map((p) => p.key), ['out', 'result']);
+        expect(def.params.map((f) => f.key), ['a', 'b']);
+      }
+    });
+
+    test('setVar 的 const 参数声明由 value 端口接管', () {
+      final f = nodeDef('setVar').params.firstWhere((f) => f.key == 'const');
+      expect(f.lockedByPort, 'value');
+    });
+
+    test('媒体节点区域字段统一为两角点', () {
+      for (final type in ['screenshot', 'ocr', 'imageMatch']) {
+        final keys = nodeDef(type).params.map((f) => f.key).toList();
+        expect(keys, containsAll(['useRegion', 'left', 'top', 'right', 'bottom']));
+        expect(keys, isNot(contains('rx')));
+        expect(keys, isNot(contains('rw')));
+      }
     });
   });
 }

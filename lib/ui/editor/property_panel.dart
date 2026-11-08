@@ -72,7 +72,7 @@ class PropertyPanel extends ConsumerWidget {
       final withEnd = data['mode'] != 'direction';
       final locate = ScreenLocateTarget(
         nodeId: node.id,
-        label: '滑动起点',
+        label: '拖拽起点',
         points: [
           LocatePointDef('startX', 'startY', AppColors.peacock.toARGB32()),
           if (withEnd)
@@ -128,12 +128,9 @@ class PropertyPanel extends ConsumerWidget {
     ('startX', 'startY'),
     ('endX', 'endY'),
     ('dx', 'dy'),
-    // 媒体节点区域参数：区域X/区域Y 一行，区域宽/区域高 一行
-    ('rx', 'ry'),
-    ('rw', 'rh'),
-    // 条件判断：左值/右值各自的 变量名+常量 一行
-    ('leftVar', 'leftConst'),
-    ('rightVar', 'rightConst'),
+    // 媒体节点区域参数：左上角 X/Y 一行，右下角 X/Y 一行
+    ('left', 'top'),
+    ('right', 'bottom'),
     // 设置变量：变量名+常量
     ('name', 'const'),
   ];
@@ -149,7 +146,7 @@ class PropertyPanel extends ConsumerWidget {
           .toList()
         ..sort();
 
-  /// 参数列表：先按节点当前取值过滤掉不适用的字段（如非滑动动作不显示起终点），
+  /// 参数列表：先按节点当前取值过滤掉不适用的字段（如非拖拽动作不显示起终点），
   /// 再让参数对左右并排（各占一半宽）。坐标对上方渲染「拾取坐标 + 屏幕定位」
   /// 两个半宽按钮；媒体节点的区域X/Y 行尾渲染框选按钮，其余字段一字段一行。
   List<Widget> _buildParamFields(WidgetRef ref, fl.GraphNode node) {
@@ -158,16 +155,13 @@ class PropertyPanel extends ConsumerWidget {
     final params = def.params.where((f) => f.visibleFor(data)).toList();
     // 坐标操作按 keyX 索引：'x'/'startX'/'endX' 分别对应一行坐标对
     final actionsByKeyX = _coordActions(node, data);
-    // 数据输入已连接且存在同名参数 → 参数锁定只读（拾取/定位会写参数，一并隐藏避免误导）。
-    // 泛化规则：适用于鼠标 X/Y、文字识别「识别文本」等所有「参数可由输入接管」的节点
+    // 数据输入已连接且接管了某个参数 → 参数灰显只读并保留原值。
+    // 默认同名接管；`lockedByPort` 支持不同名映射（如 setVar.value → const）。
     final lockedKeys = <String>{
-      for (final p in def.inputs)
-        if (p.kind == PortKind.data &&
-            def.params.any((f) => f.key == p.key) &&
-            _hasDataInput(node, p.key))
-          p.key,
+      for (final f in def.params)
+        if (_hasDataInput(node, f.lockedByPort ?? f.key)) f.key,
     };
-    // 媒体节点区域可通过屏幕框选获取：区域X/Y 行尾放框选按钮
+    // 媒体节点区域可通过屏幕框选获取：左上角 X/Y 行尾放框选按钮
     final regionPickable =
         def.category == NodeCategory.media && data['useRegion'] != null;
     final children = <Widget>[];
@@ -178,7 +172,7 @@ class PropertyPanel extends ConsumerWidget {
       if (next != null &&
           _kCoordPairs.any((p) => p.$1 == f.key && p.$2 == next.key)) {
         final actions = actionsByKeyX[f.key];
-        final regionButton = regionPickable && f.key == 'rx';
+        final regionButton = regionPickable && f.key == 'left';
         final pairLocked =
             lockedKeys.contains(f.key) || lockedKeys.contains(next.key);
         // 拾取/定位按钮独占一整行，放在坐标输入框上方
@@ -775,10 +769,10 @@ class _InlineRegionPickButton extends ConsumerWidget {
                     controller: controller,
                     target: RegionPickTarget(
                       nodeId: node.id,
-                      keyX: 'rx',
-                      keyY: 'ry',
-                      keyW: 'rw',
-                      keyH: 'rh',
+                      keyLeft: 'left',
+                      keyTop: 'top',
+                      keyRight: 'right',
+                      keyBottom: 'bottom',
                       label: '框选区域',
                     ),
                   ),
@@ -893,8 +887,8 @@ class _ParamTextFieldState extends State<_ParamTextField> {
   }
 
   String _valueText() {
-    // 锁定（已接入数据输入）时参数不再生效，展示 0 而非残留的手填坐标
-    if (widget.locked) return '0';
+    // 锁定（已接入数据输入）时参数不再生效，但保留并显示原值，
+    // 断开连线后可直接继续使用
     final v = widget.node.data[widget.field.key] ?? widget.field.defaultValue;
     if (v == null) return '';
     if (v is num) {

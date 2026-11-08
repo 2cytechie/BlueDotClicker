@@ -20,10 +20,10 @@ class _FakeRegionPicker extends RegionPicker {
 
 const _target = RegionPickTarget(
   nodeId: 's1',
-  keyX: 'rx',
-  keyY: 'ry',
-  keyW: 'rw',
-  keyH: 'rh',
+  keyLeft: 'left',
+  keyTop: 'top',
+  keyRight: 'right',
+  keyBottom: 'bottom',
   label: '框选区域',
 );
 
@@ -53,7 +53,7 @@ void main() {
 
   Map<String, dynamic> data() => controller.graph.nodes['s1']!.data;
 
-  test('框选确认：写回 rx/ry/rw/rh 并自动勾选 useRegion', () async {
+  test('框选确认：换算为两角点写回并自动勾选 useRegion', () async {
     final picker = _FakeRegionPicker(const RegionPickResult(10, 20, 30, 40));
     final container = containerWith(picker);
 
@@ -63,10 +63,10 @@ void main() {
         );
 
     expect(picker.calls, 1);
-    expect(data()['rx'], 10);
-    expect(data()['ry'], 20);
-    expect(data()['rw'], 30);
-    expect(data()['rh'], 40);
+    expect(data()['left'], 10);
+    expect(data()['top'], 20);
+    expect(data()['right'], 40);
+    expect(data()['bottom'], 60);
     expect(data()['useRegion'], isTrue, reason: '框选确认后应自动勾选仅指定区域');
     expect(container.read(regionPickProvider).active, isFalse);
   });
@@ -76,10 +76,10 @@ void main() {
       's1',
       (n) => n.withData(const {
         'useRegion': false,
-        'rx': 1,
-        'ry': 2,
-        'rw': 3,
-        'rh': 4,
+        'left': 1,
+        'top': 2,
+        'right': 4,
+        'bottom': 6,
       }),
     );
     final picker = _FakeRegionPicker(null);
@@ -91,10 +91,10 @@ void main() {
         );
 
     expect(picker.calls, 1);
-    expect(data()['rx'], 1);
-    expect(data()['ry'], 2);
-    expect(data()['rw'], 3);
-    expect(data()['rh'], 4);
+    expect(data()['left'], 1);
+    expect(data()['top'], 2);
+    expect(data()['right'], 4);
+    expect(data()['bottom'], 6);
     expect(data()['useRegion'], isFalse);
   });
 }

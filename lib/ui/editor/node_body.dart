@@ -16,6 +16,7 @@ fl.NodeWidgetBuilder nodeBodyBuilder({String? runningNodeId}) =>
       categoryColor: nodeDef(node.type).category.color,
       selected: state.isSelected,
       highlight: node.id == runningNodeId,
+      connectedPorts: state.connectedPorts,
     );
 
 class _NodeBodyContent extends StatelessWidget {
@@ -25,6 +26,7 @@ class _NodeBodyContent extends StatelessWidget {
     required this.categoryColor,
     required this.selected,
     required this.highlight,
+    this.connectedPorts = const {},
   });
 
   final fl.GraphNode node;
@@ -32,6 +34,10 @@ class _NodeBodyContent extends StatelessWidget {
   final Color categoryColor;
   final bool selected;
   final bool highlight;
+
+  /// 当前已有连线的端口 id 集合（由 NodeRenderState 提供），
+  /// 用于摘要中体现「数据边优先」的取值来源。
+  final Set<String> connectedPorts;
 
   @override
   Widget build(BuildContext context) {
@@ -152,12 +158,13 @@ class _NodeBodyContent extends StatelessWidget {
                   '(${v('startX')},${v('startY')}) → (${v('endX')},${v('endY')})',
                 );
               }
-              lines.add('${v('durationMs')}ms');
+              lines.add('${v('durationMs')}ms ${_buttonName(v('button'))}');
             case 'scroll':
               lines.add('(${v('x')}, ${v('y')})');
               lines.add('dx=${v('dx')} dy=${v('dy')}');
             case 'move':
-              lines.add('→ (${v('x')}, ${v('y')})');
+              final dur = _asInt(data['moveDurationMs']);
+              lines.add('→ (${v('x')}, ${v('y')})${dur > 0 ? ' ${dur}ms' : ''}');
             case 'longPress':
               lines.add('(${v('x')}, ${v('y')}) ${_buttonName(v('button'))}');
               lines.add('保持 ${v('holdMs')}ms');
@@ -191,25 +198,39 @@ class _NodeBodyContent extends StatelessWidget {
             lines.add('阈值 ${v('threshold')}');
           }
           if (node.type == 'ocr') {
-            final r = v('resultVar');
-            if (r != null && r.isNotEmpty) lines.add('识别文本 → $r');
+            final target = v('targetText');
+            if (target != null && target.isNotEmpty) {
+              lines.add('目标文本：$target');
+            }
           }
         }
         if (v('useRegion') == 'true') {
-          lines.add('区域 (${v('rx')},${v('ry')}) ${v('rw')}×${v('rh')}');
+          lines.add(
+            '区域 (${v('left')},${v('top')}) → (${v('right')},${v('bottom')})',
+          );
         } else {
           lines.add(node.type == 'screenshot' ? '全屏' : '全屏区域');
         }
       case 'condition':
-        lines.add(
-          '左值 ${v('leftVar')?.isEmpty == false ? v('leftVar') : v('leftConst')}',
-        );
-        lines.add(
-          '${_opLabel(v('op'))} 右值 ${v('rightVar')?.isEmpty == false ? v('rightVar') : v('rightConst')}',
-        );
+        lines.add('左值 ${v('leftConst')}');
+        lines.add('${_opLabel(v('op'))} 右值 ${v('rightConst')}');
       case 'loop':
-        final count = v('count');
-        lines.add(count == '0' ? '无限循环' : '循环 $count 次');
+        // 数据边优先：左值/右值接入数据边时摘要显示「上游数据」，
+        // 否则兜底显示常量参数（与引擎 _resolveInput 的取值顺序一致）
+        String operandText(String port, String constKey, String fallback) =>
+            connectedPorts.contains(port)
+            ? '上游数据'
+            : (v(constKey)?.isEmpty == false ? v(constKey)! : fallback);
+        lines.add(
+          '当 ${operandText('left', 'leftConst', '左值')} ${_opLabel(v('op'))} ${operandText('right', 'rightConst', '右值')} 时循环',
+        );
+        final maxIt = _asInt(data['maxIterations']);
+        if (maxIt > 0) lines.add('最多 $maxIt 次');
+      case 'add':
+      case 'subtract':
+        lines.add(
+          '${v('a')} ${node.type == 'add' ? '+' : '−'} ${v('b')}',
+        );
       case 'delay':
         lines.add('等待 ${v('ms')}ms');
       case 'setVar':
@@ -221,6 +242,10 @@ class _NodeBodyContent extends StatelessWidget {
       case 'start':
         final c = v('count') ?? '1'; // 旧脚本无此参数时按默认 1 次
         lines.add(c == '0' ? '一直执行（F10 停止）' : '执行 $c 次');
+        // 跨轮语义提示：每轮清空端口缓存/截图，变量跨轮保留
+        if (_asInt(data['count']) != 1) {
+          lines.add('每轮清空端口缓存/截图，变量跨轮保留');
+        }
       default:
         // 已移除/未知类型：显式提示，避免看起来像正常节点
         lines.add('已移除的类型：${node.type}');
@@ -247,6 +272,7 @@ class _NodeBodyContent extends StatelessWidget {
     '>=' => '≥',
     '<=' => '≤',
     'contains' => '包含',
+    'notContains' => '不包含',
     _ => '?',
   };
 }

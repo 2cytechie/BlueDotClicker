@@ -8,6 +8,7 @@ import '../models/key_names.dart';
 import '../platform/platform_automation.dart';
 import '../platform/recording.dart' show replayActions;
 import '../services/file_saver.dart';
+import '../services/ocr_target.dart';
 import '../services/recognition.dart';
 import '../services/windows_recognition.dart' show loadTemplateFile;
 import 'variables.dart';
@@ -61,8 +62,11 @@ class BlueprintInterpreter {
   /// 数据保存节点落盘服务（overrideDir 静态注入便于测试）
   final SaveFileService _saver = SaveFileService();
 
-  /// 循环节点剩余计数（-1 = 无限）
-  final Map<String, int> _loopRemaining = {};
+  /// 循环节点安全阀计数（每次经输入端口进入 +1，循环结束时清空）
+  final Map<String, int> _loopIterations = {};
+
+  /// 本次运行已提示过警告的节点 id（变量缺失等，避免循环内刷屏）
+  final Set<String> _warnedNodes = {};
 
   /// 组合键执行中尚未抬起的按键：停止或异常结束时统一释放，避免卡住用户桌面
   final Set<int> _pressedKeys = {};
@@ -78,7 +82,8 @@ class BlueprintInterpreter {
     vars = VariableTable(initialVars ?? script.variables);
     _lastImage = null;
     _portValues.clear();
-    _loopRemaining.clear();
+    _loopIterations.clear();
+    _warnedNodes.clear();
     _pressedKeys.clear();
     try {
       final start = script.findStart();
@@ -97,7 +102,7 @@ class BlueprintInterpreter {
         if (!forever && count > 1) hooks.log('—— 第 $round/$count 次 ——');
         // 每轮清空端口与截图缓存（变量表跨轮保留，可作累计器）
         _portValues.clear();
-        _loopRemaining.clear();
+        _loopIterations.clear();
         _lastImage = null;
         await _exec(script, start, 'enter');
       }
@@ -156,6 +161,7 @@ class BlueprintInterpreter {
 
       case 'playRecording':
         {
+          _writeOut(n, 'success', false);
           final id = ((n.params['recordingId'] as String?) ?? '').trim();
           if (id.isEmpty) {
             hooks.log('执行录制失败：未选择录制');
@@ -169,59 +175,117 @@ class BlueprintInterpreter {
           hooks.log('执行录制「${rec.name}」共 ${rec.actions.length} 个动作');
           await replayActions(automation, rec.actions,
               cancelled: () => _stopped, log: hooks.log);
-          hooks.log(_stopped ? '执行录制中止' : '录制「${rec.name}」执行完成');
+          if (_stopped) {
+            hooks.log('执行录制中止');
+            return 'out';
+          }
+          _writeOut(n, 'success', true);
+          hooks.log('录制「${rec.name}」执行完成');
           return 'out';
         }
 
       case 'screenshot':
-        // 区域坐标支持负值（副屏在主屏左侧/上方时为负）
-        _lastImage = await _captureNow(region: _region(n));
-        _portValues[PortRef(nodeId: n.id, port: 'imageOut')] = _lastImage;
-        hooks.log('截图 ${_lastImage != null ? '${_lastImage!.width}×${_lastImage!.height}' : '失败'}');
-        return 'out';
+        {
+          _writeOut(n, 'success', false);
+          final region = await _resolveRegion(script, n);
+          if (region.enabled && !region.valid) {
+            hooks.log('截图失败：区域无效（宽或高为 0）');
+            _lastImage = null;
+            _writeOut(n, 'imageOut', null);
+            return 'out';
+          }
+          // 区域坐标支持负值（副屏在主屏左侧/上方时为负）
+          _lastImage = await _captureNow(region: region.rect);
+          _portValues[PortRef(nodeId: n.id, port: 'imageOut')] = _lastImage;
+          final ok = _lastImage != null;
+          _writeOut(n, 'success', ok);
+          hooks.log(
+              '截图 ${ok ? '${_lastImage!.width}×${_lastImage!.height}' : '失败'}');
+          return 'out';
+        }
 
       case 'ocr':
         {
-          final region = _region(n);
-          final img = await _acquireImage(script, n, region: region);
+          _writeOut(n, 'success', false);
+          final region = await _resolveRegion(script, n);
+          if (region.enabled && !region.valid) {
+            hooks.log('OCR 失败：区域无效（宽或高为 0）');
+            _writeOcrFailure(n);
+            return 'out';
+          }
+          final img = await _acquireImage(script, n, region: region.rect);
           if (img == null) {
             hooks.log('OCR 失败：无可用图像');
-            _writeOut(n, 'text', '');
-            _writeOut(n, 'found', false);
+            _writeOcrFailure(n);
             return 'out';
           }
           final res = await recognition.recognizeText(img);
-          // 坐标输出为识别区域中心点：区域坐标X + 区域宽 ÷ 2
-          // （未框选区域时为所识别图像的中心，即全屏截图时的屏幕中心）
+          final target =
+              ((await _resolveInput(script, n, 'targetText', 'targetText')) ?? '')
+                  .toString();
+          // 坐标输出：目标文本为空 = 识别区域中心（旧语义）；
+          // 目标非空 = 命中文字包围盒中心，未命中为 -1。
           final (imgX, imgY) = _imageOrigin[img] ?? (0, 0);
-          final cx = region != null ? region.x + region.w ~/ 2 : imgX + img.width ~/ 2;
-          final cy = region != null ? region.y + region.h ~/ 2 : imgY + img.height ~/ 2;
-          // 变量名：「识别文本」数据输入优先，回退参数手写值
-          final varName =
-              ((await _resolveInput(script, n, 'resultVar', null, 'resultVar')) ?? '')
-                  .toString()
-                  .trim();
-          if (varName.isNotEmpty) vars[varName] = res.text;
+          var found = res.text.isNotEmpty;
+          var cx = region.rect != null
+              ? region.rect!.x + region.rect!.w ~/ 2
+              : imgX + img.width ~/ 2;
+          var cy = region.rect != null
+              ? region.rect!.y + region.rect!.h ~/ 2
+              : imgY + img.height ~/ 2;
+          if (target.trim().isNotEmpty) {
+            final hit = findOcrTarget(res.words, target);
+            if (hit != null) {
+              found = true;
+              cx = imgX + hit.x;
+              cy = imgY + hit.y;
+              hooks.log('OCR 命中「$target」→ ($cx, $cy)');
+            } else if (res.words.isEmpty &&
+                normalizeOcrText(res.text).contains(normalizeOcrText(target))) {
+              // 引擎未返回词框：只能判断命中，坐标回退区域中心
+              found = true;
+              hooks.log('OCR 命中「$target」（无词框，坐标回退区域中心）');
+            } else {
+              found = false;
+              cx = -1;
+              cy = -1;
+              hooks.log('OCR 未找到目标文本「$target」');
+            }
+          }
           _writeOut(n, 'text', res.text);
-          _writeOut(n, 'found', res.text.isNotEmpty);
+          _writeOut(n, 'found', found);
           _writeOut(n, 'x', cx);
           _writeOut(n, 'y', cy);
-          hooks.log('OCR: "${_brief(res.text)}" → ${varName.isEmpty ? '(未存变量)' : varName}');
+          _writeOut(n, 'success', true);
+          hooks.log('OCR: "${_brief(res.text)}"');
           return 'out';
         }
 
       case 'imageMatch':
         {
+          _writeOut(n, 'success', false);
           final tplPath = (n.params['templatePath'] as String?)?.trim() ?? '';
           if (tplPath.isEmpty) {
             hooks.log('图像识别失败：未选择模板图片');
             _setFound(n, false);
             return 'out';
           }
-          final tpl = await _getTemplate(tplPath);
+          final RawImage tpl;
+          try {
+            tpl = await _getTemplate(tplPath);
+          } catch (_) {
+            // 模板加载失败按节点失败处理，执行流继续
+            _setFound(n, false);
+            return 'out';
+          }
           final threshold = (n.params['threshold'] as num?)?.toDouble() ?? 0.8;
-          final region = _region(n);
-          final img = await _acquireImage(script, n, region: region);
+          final region = await _resolveRegion(script, n);
+          if (region.enabled && !region.valid) {
+            hooks.log('图像识别失败：区域无效（宽或高为 0）');
+            _setFound(n, false);
+            return 'out';
+          }
+          final img = await _acquireImage(script, n, region: region.rect);
           if (img == null) {
             hooks.log('图像识别失败：无可用图像');
             _setFound(n, false);
@@ -232,6 +296,7 @@ class BlueprintInterpreter {
           final fullX = imgX + r.x;
           final fullY = imgY + r.y;
           _setFound(n, r.found, x: fullX, y: fullY, score: r.score);
+          _writeOut(n, 'success', true);
           hooks.log(
               '图像识别: ${r.found ? "命中" : "未命中"} score=${r.score.toStringAsFixed(3)} pos=($fullX,$fullY)');
           return 'out';
@@ -239,8 +304,8 @@ class BlueprintInterpreter {
 
       case 'condition':
         {
-          final left = await _resolveInput(script, n, 'left', 'leftVar', 'leftConst');
-          final right = await _resolveInput(script, n, 'right', 'rightVar', 'rightConst');
+          final left = await _resolveInput(script, n, 'left', 'leftConst');
+          final right = await _resolveInput(script, n, 'right', 'rightConst');
           final op = (n.params['op'] as String?) ?? '==';
           final ok = compareValues(left, right, op);
           hooks.log('条件: ${_brief(left)} $op ${_brief(right)} → ${ok ? '真' : '假'}');
@@ -249,20 +314,23 @@ class BlueprintInterpreter {
 
       case 'loop':
         {
-          final count = (n.params['count'] as num?)?.toInt() ?? 0;
-          final isInfinite = count <= 0;
-          if (inPort == 'enter' && !_loopRemaining.containsKey(n.id)) {
-            _loopRemaining[n.id] = isInfinite ? -1 : count;
+          final maxIterations = (n.params['maxIterations'] as num?)?.toInt() ?? 0;
+          final iterations = (_loopIterations[n.id] ?? 0) + 1;
+          _loopIterations[n.id] = iterations;
+          if (maxIterations > 0 && iterations > maxIterations) {
+            _loopIterations.remove(n.id);
+            hooks.log('循环达到最大次数 $maxIterations，强制结束');
+            return 'false';
           }
-          final remaining = _loopRemaining[n.id] ?? 0;
-          if (isInfinite && remaining == -1 || remaining > 0) {
-            if (!isInfinite) _loopRemaining[n.id] = remaining - 1;
-            hooks.log(isInfinite ? '循环(无限) → body' : '循环 → body (剩 ${_loopRemaining[n.id]})');
-            return 'body';
-          }
-          _loopRemaining.remove(n.id);
-          hooks.log('循环完成');
-          return 'done';
+          final left = await _resolveInput(script, n, 'left', 'leftConst');
+          final right = await _resolveInput(script, n, 'right', 'rightConst');
+          final op = (n.params['op'] as String?) ?? '==';
+          final ok = compareValues(left, right, op);
+          hooks.log(
+              '循环: ${_brief(left)} ${_compareOpLabel(op)} ${_brief(right)} → ${ok ? '真' : '假'}');
+          if (ok) return 'true';
+          _loopIterations.remove(n.id);
+          return 'false';
         }
 
       case 'delay':
@@ -275,42 +343,56 @@ class BlueprintInterpreter {
 
       case 'setVar':
         {
+          _writeOut(n, 'success', false);
           final name = ((n.params['name'] as String?) ?? '').trim();
           if (name.isEmpty) {
             hooks.log('设置变量失败：变量名为空');
             return 'out';
           }
-          final value = await _resolveInput(script, n, 'value', null, 'const');
+          final value = await _resolveInput(script, n, 'value', 'const');
           vars[name] = value is String ? VariableTable.parseLiteral(value) : (value ?? '');
           _writeOut(n, 'valueOut', vars[name]);
+          _writeOut(n, 'success', true);
           hooks.log('变量 $name = ${_brief(vars[name])}');
           return 'out';
         }
 
-      case 'getVar':
+      case 'add':
+      case 'subtract':
         {
-          final name = ((n.params['name'] as String?) ?? '').trim();
-          if (name.isEmpty) {
-            hooks.log('获取变量失败：变量名为空');
-            _writeOut(n, 'value', '');
+          final isAdd = n.type == 'add';
+          final a = await _resolveNumber(script, n, 'a', 'a');
+          final b = await _resolveNumber(script, n, 'b', 'b');
+          if (a == null || b == null) {
+            hooks.log('${isAdd ? '加法' : '减法'}失败：${a == null ? 'A' : 'B'} 不是数字');
+            _writeOut(n, 'result', 0);
             return 'out';
           }
-          final v = vars.contains(name) ? vars[name] : '';
-          _writeOut(n, 'value', v);
-          hooks.log('读取变量 $name = ${_brief(v)}');
+          final value = isAdd ? a + b : a - b;
+          final result = value is double && value == value.roundToDouble()
+              ? value.toInt()
+              : value;
+          _writeOut(n, 'result', result);
+          hooks.log(
+              '${isAdd ? '加法' : '减法'}: ${_brief(a)} ${isAdd ? '+' : '−'} ${_brief(b)} = ${_brief(result)}');
           return 'out';
         }
 
       case 'saveData':
         {
+          _writeOut(n, 'success', false);
           // 透传输出（与保存成败解耦：数据继续流给下游使用）
           final imgEdge = script.inEdges(n.id, 'image', kind: EdgeKind.data);
-          final imgValue = imgEdge.isNotEmpty ? _portValues[imgEdge.first.from] : null;
+          final imgValue = imgEdge.isNotEmpty
+              ? await _readDataPort(script, imgEdge.first.from)
+              : null;
           if (imgValue is RawImage) _writeOut(n, 'imageOut', imgValue);
           final textEdge = script.inEdges(n.id, 'text', kind: EdgeKind.data);
-          final hasText =
-              textEdge.isNotEmpty && _portValues.containsKey(textEdge.first.from);
-          if (hasText) _writeOut(n, 'textOut', _portValues[textEdge.first.from]);
+          final textValue = textEdge.isNotEmpty
+              ? await _readDataPort(script, textEdge.first.from)
+              : null;
+          final hasText = textEdge.isNotEmpty && textValue != null;
+          if (hasText) _writeOut(n, 'textOut', textValue);
 
           final raw = ((n.params['fileName'] as String?) ?? '').trim();
           if (raw.isEmpty) {
@@ -324,11 +406,15 @@ class BlueprintInterpreter {
             hooks.log('已保存图像 → $p');
           }
           if (hasText) {
-            final p = await _saver.saveText(raw, '${_portValues[textEdge.first.from]}');
+            final p = await _saver.saveText(raw, '$textValue');
             saved = true;
             hooks.log('已保存文本 → $p');
           }
-          if (!saved) hooks.log('数据保存：未连接文本/图像输入，未保存文件');
+          if (!saved) {
+            hooks.log('数据保存：未连接文本/图像输入，未保存文件');
+            return 'out';
+          }
+          _writeOut(n, 'success', true);
           return 'out';
         }
 
@@ -344,40 +430,69 @@ class BlueprintInterpreter {
 
   Future<void> _executeMouse(BlueprintScript script, BPNode n) async {
     final action = (n.params['action'] as String?) ?? 'click';
-    final x = _mouseCoord(script, n, 'x');
-    final y = _mouseCoord(script, n, 'y');
     final button = _mouseButton(n.params['button']);
     switch (action) {
       case 'click':
-        await automation.click(x, y, button: button);
-        hooks.log('单击 ($x, $y)${_buttonLabel(button)}');
+        {
+          final x = await _mouseCoord(script, n, 'x');
+          final y = await _mouseCoord(script, n, 'y');
+          await automation.click(x, y, button: button);
+          hooks.log('单击 ($x, $y)${_buttonLabel(button)}');
+        }
       case 'doubleClick':
-        await automation.click(x, y, button: button, count: 2);
-        hooks.log('双击 ($x, $y)${_buttonLabel(button)}');
+        {
+          final x = await _mouseCoord(script, n, 'x');
+          final y = await _mouseCoord(script, n, 'y');
+          await automation.click(x, y, button: button, count: 2);
+          hooks.log('双击 ($x, $y)${_buttonLabel(button)}');
+        }
       case 'swipe':
         {
-          final (x1, y1) = _swipeStart(n);
-          final (x2, y2) = _swipeEnd(n);
+          final x1 = await _mouseCoord(script, n, 'startX');
+          final y1 = await _mouseCoord(script, n, 'startY');
+          final (x2, y2) = await _swipeEnd(script, n, x1, y1);
           final dur = (n.params['durationMs'] as num?)?.toInt() ?? 300;
-          await automation.swipe(x1, y1, x2, y2, durationMs: dur);
-          hooks.log('滑动 ($x1,$y1) → ($x2,$y2) ${dur}ms');
+          await automation.swipe(
+            x1,
+            y1,
+            x2,
+            y2,
+            durationMs: dur,
+            button: button,
+            cancelled: () => _stopped,
+          );
+          hooks.log('拖拽 ($x1,$y1) → ($x2,$y2) ${dur}ms${_buttonLabel(button)}');
         }
       case 'longPress':
         {
+          final x = await _mouseCoord(script, n, 'x');
+          final y = await _mouseCoord(script, n, 'y');
           final hold = (n.params['holdMs'] as num?)?.toInt() ?? 800;
           await automation.longPress(x, y, durationMs: hold, button: button);
           hooks.log('长按 ($x, $y) ${hold}ms ${_buttonName(button)}');
         }
       case 'scroll':
         {
+          final x = await _mouseCoord(script, n, 'x');
+          final y = await _mouseCoord(script, n, 'y');
           final dx = _paramInt(n, 'dx');
           final dy = _paramInt(n, 'dy');
           await automation.scrollWheel(x, y, dy: dy, dx: dx);
           hooks.log('滚轮 ($x, $y) dx=$dx dy=$dy');
         }
       case 'move':
-        await automation.moveMouse(x, y);
-        hooks.log('移动鼠标 ($x, $y)');
+        {
+          final x = await _mouseCoord(script, n, 'x');
+          final y = await _mouseCoord(script, n, 'y');
+          final dur = _paramInt(n, 'moveDurationMs');
+          await automation.moveMouse(
+            x,
+            y,
+            durationMs: dur,
+            cancelled: () => _stopped,
+          );
+          hooks.log('移动鼠标 ($x, $y)${dur > 0 ? ' ${dur}ms' : ''}');
+        }
       default:
         hooks.log('鼠标操作失败：未知动作 "$action"');
     }
@@ -464,18 +579,47 @@ class BlueprintInterpreter {
     return int.tryParse('$v') ?? 0;
   }
 
-  /// 鼠标坐标：X/Y 数据输入有连接且上游已产出可解析数值时以输入为准
+  /// 鼠标坐标：数据输入有连接且上游可解析为数值时以输入为准
   /// （属性面板对应参数此时为锁定只读），否则回退节点参数值。
   /// 输入值非数字（如误连布尔/文本）时也回退参数，避免把光标移到 (0,0)。
-  int _mouseCoord(BlueprintScript script, BPNode n, String key) {
+  Future<int> _mouseCoord(
+    BlueprintScript script,
+    BPNode n,
+    String key,
+  ) async {
     final edges = script.inEdges(n.id, key, kind: EdgeKind.data);
-    if (edges.isNotEmpty && _portValues.containsKey(edges.first.from)) {
-      final v = _portValues[edges.first.from];
+    if (edges.isNotEmpty) {
+      final v = await _readDataPort(script, edges.first.from);
       if (v is num) return v.toInt();
-      final parsed = int.tryParse('$v'.trim());
+      final parsed = int.tryParse('${v ?? ''}'.trim());
       if (parsed != null) return parsed;
     }
     return _paramInt(n, key);
+  }
+
+  /// 读取数据边源端口值：端口缓存优先；纯数据节点（getVar）按需读取变量。
+  /// 返回 null 表示上游没有可用值（非纯数据节点且未执行过）。
+  Future<Object?> _readDataPort(BlueprintScript script, PortRef ref) async {
+    if (_portValues.containsKey(ref)) return _portValues[ref];
+    final upstream = script.nodes[ref.nodeId];
+    if (upstream != null && upstream.type == 'getVar') {
+      final name = ((upstream.params['name'] as String?) ?? '').trim();
+      if (name.isEmpty) {
+        _warnOnce(upstream.id, '获取变量：变量名为空（按空值处理）');
+        return '';
+      }
+      if (!vars.contains(name)) {
+        _warnOnce(upstream.id, '获取变量：变量 "$name" 不存在（按空值处理）');
+        return '';
+      }
+      return vars[name];
+    }
+    return null;
+  }
+
+  /// 纯数据读取的警告每个节点每次运行只提示一次，避免循环内刷屏
+  void _warnOnce(String nodeId, String message) {
+    if (_warnedNodes.add(nodeId)) hooks.log(message);
   }
 
   int _vkCode(BPNode n) {
@@ -503,29 +647,52 @@ class BlueprintInterpreter {
         _ => '左键',
       };
 
-  (int, int) _swipeStart(BPNode n) =>
-      (_paramInt(n, 'startX'), _paramInt(n, 'startY'));
+  /// 媒体节点区域：useRegion=false 时忽略四个角点（含已连接数据边）；
+  /// 四个角点支持数据边驱动，输入非数字时回退参数；两点顺序颠倒按 min/max。
+  Future<RegionParse> _resolveRegion(
+    BlueprintScript script,
+    BPNode n,
+  ) async {
+    if (n.params['useRegion'] != true) return const RegionParse.disabled();
+    final l = await _mouseCoord(script, n, 'left');
+    final t = await _mouseCoord(script, n, 'top');
+    final r = await _mouseCoord(script, n, 'right');
+    final b = await _mouseCoord(script, n, 'bottom');
+    final left = l < r ? l : r;
+    final top = t < b ? t : b;
+    final right = l < r ? r : l;
+    final bottom = t < b ? b : t;
+    if (l > r || t > b) {
+      hooks.log('区域坐标顺序已自动纠正：按左上/右下组成矩形');
+    }
+    if (right - left <= 0 || bottom - top <= 0) {
+      return const RegionParse.invalid();
+    }
+    return RegionParse.valid(RectPx(left, top, right - left, bottom - top));
+  }
 
-  (int, int) _swipeEnd(BPNode n) {
+  /// 拖拽终点：方向距离模式由起点 + 角度/距离计算（忽略终点输入），
+  /// 起点终点模式读取终点数据边，非数字回退参数。
+  Future<(int, int)> _swipeEnd(
+    BlueprintScript script,
+    BPNode n,
+    int sx,
+    int sy,
+  ) async {
     final mode = (n.params['mode'] as String?) ?? 'coords';
     if (mode == 'direction') {
       final angleDeg = (n.params['angle'] as num?)?.toDouble() ?? 0;
       final dist = _paramInt(n, 'distance');
       final rad = -angleDeg * math.pi / 180; // 屏幕Y向下，角度逆时针为正
-      final sx = _paramInt(n, 'startX');
-      final sy = _paramInt(n, 'startY');
-      return (sx + (dist * math.cos(rad)).round(), sy + (dist * math.sin(rad)).round());
+      return (
+        sx + (dist * math.cos(rad)).round(),
+        sy + (dist * math.sin(rad)).round(),
+      );
     }
-    return (_paramInt(n, 'endX'), _paramInt(n, 'endY'));
-  }
-
-  RectPx? _region(BPNode n) {
-    if (n.params['useRegion'] != true) return null;
-    final x = (n.params['rx'] as num?)?.toInt() ?? 0;
-    final y = (n.params['ry'] as num?)?.toInt() ?? 0;
-    final w = (n.params['rw'] as num?)?.toInt() ?? 400;
-    final h = (n.params['rh'] as num?)?.toInt() ?? 300;
-    return RectPx(x, y, w, h);
+    return (
+      await _mouseCoord(script, n, 'endX'),
+      await _mouseCoord(script, n, 'endY'),
+    );
   }
 
   /// 获取节点输入图像：数据边 > 上次截图 > 现场截屏。
@@ -534,7 +701,7 @@ class BlueprintInterpreter {
     RawImage? img;
     final dataEdges = script.inEdges(n.id, 'image', kind: EdgeKind.data);
     if (dataEdges.isNotEmpty) {
-      final v = _portValues[dataEdges.first.from];
+      final v = await _readDataPort(script, dataEdges.first.from);
       if (v is RawImage) img = v;
     }
     img ??= _lastImage;
@@ -595,23 +762,62 @@ class BlueprintInterpreter {
     }
   }
 
-  /// 解析输入端口值：数据边 > 变量名 > 常量参数
+  /// 解析输入端口值：数据边 > 常量参数（数据边可读取纯数据节点）
   Future<Object?> _resolveInput(
-      BlueprintScript script, BPNode n, String port, String? varKey, String? constKey) async {
+    BlueprintScript script,
+    BPNode n,
+    String port,
+    String? constKey,
+  ) async {
     final edges = script.inEdges(n.id, port, kind: EdgeKind.data);
     if (edges.isNotEmpty) {
-      final v = _portValues[edges.first.from];
+      final v = await _readDataPort(script, edges.first.from);
       if (v != null) return v;
-    }
-    if (varKey != null) {
-      final name = ((n.params[varKey] as String?) ?? '').trim();
-      if (name.isNotEmpty && vars.contains(name)) return vars[name];
     }
     if (constKey != null) {
       return (n.params[constKey] as String?) ?? '';
     }
     return '';
   }
+
+  /// 数值操作数：数据边优先（连接后不回退参数）；非数字返回 null。
+  Future<num?> _resolveNumber(
+    BlueprintScript script,
+    BPNode n,
+    String port,
+    String paramKey,
+  ) async {
+    final edges = script.inEdges(n.id, port, kind: EdgeKind.data);
+    if (edges.isNotEmpty) {
+      final v = await _readDataPort(script, edges.first.from);
+      if (v is num) return v;
+      return num.tryParse('${v ?? ''}'.trim());
+    }
+    final p = n.params[paramKey];
+    if (p is num) return p;
+    return num.tryParse('${p ?? ''}'.trim());
+  }
+
+  /// OCR 失败时统一写空输出（success=false）
+  void _writeOcrFailure(BPNode n) {
+    _writeOut(n, 'text', '');
+    _writeOut(n, 'found', false);
+    _writeOut(n, 'x', -1);
+    _writeOut(n, 'y', -1);
+    _writeOut(n, 'success', false);
+  }
+
+  String _compareOpLabel(String op) => switch (op) {
+        '==' => '等于',
+        '!=' => '不等于',
+        '>' => '大于',
+        '<' => '小于',
+        '>=' => '大于等于',
+        '<=' => '小于等于',
+        'contains' => '包含',
+        'notContains' => '不包含',
+        _ => op,
+      };
 
   String _brief(Object? v) {
     final s = '$v';

@@ -15,6 +15,9 @@ import 'template_match_dart.dart';
 class WindowsRecognitionService implements RecognitionService {
   WindowsRecognitionService();
 
+  /// OCR 位图相对输入图像的放大倍数（当前不做放大，词框直接为原图像素）。
+  static const double ocrScaleFactor = 1.0;
+
   final DartTemplateMatcher _dartMatcher = const DartTemplateMatcher();
   final OpenCvMatcher _cvMatcher = const OpenCvMatcher();
   bool? _opencvAvailable;
@@ -43,15 +46,28 @@ class WindowsRecognitionService implements RecognitionService {
     final file = File(
         '${dir.path}${Platform.pathSeparator}bpc_ocr_${DateTime.now().microsecondsSinceEpoch}.png');
     await file.writeAsBytes(png);
-    String text;
     try {
-      text = await WinrtOcr.recognizeText(file.path);
+      final boxes = await WinrtOcr.recognizeWithBoxes(file.path);
+      // 原生词框基于传入位图像素；若将来对图像做放大，需除以放大倍数还原。
+      final words = [
+        for (final w in boxes.words)
+          OcrWordBox(
+            w.text,
+            (w.x / ocrScaleFactor).round(),
+            (w.y / ocrScaleFactor).round(),
+            (w.w / ocrScaleFactor).round(),
+            (w.h / ocrScaleFactor).round(),
+          ),
+      ];
+      return OcrResult(boxes.text.trim(), x: ox, y: oy, words: words);
+    } on WinrtOcrException {
+      // 无 OCR 语言包等引擎级失败：按「未识别到文本」处理，不中断脚本
+      return OcrResult('', x: ox, y: oy);
     } finally {
       try {
         await file.delete();
       } catch (_) {}
     }
-    return OcrResult(text.trim(), x: ox, y: oy);
   }
 
   // ---- 模板匹配 ----

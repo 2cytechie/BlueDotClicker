@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
@@ -7,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/theme.dart';
 import '../models/blueprint.dart';
 import '../models/node_types.dart';
+import '../services/script_package.dart';
 import '../state/providers.dart';
 import 'common.dart';
 
@@ -130,26 +132,42 @@ class HomePage extends ConsumerWidget {
     ref.read(appNavProvider.notifier).go(AppTab.editor);
   }
 
-  /// 导入脚本 JSON 文件
+  /// 导入脚本：按文件头分流 ZIP 包（.bpc.zip）与纯 JSON（.bpc.json）
   Future<void> _importScript(BuildContext context, WidgetRef ref) async {
-    final f = await openFile();
+    const group = XTypeGroup(label: '脚本包', extensions: ['zip', 'json']);
+    final f = await openFile(
+      acceptedTypeGroups: const [group],
+      confirmButtonText: '导入',
+    );
     if (f == null || !context.mounted) return;
     try {
-      final text = await f.readAsString();
-      final fallback = f.name.replaceAll(RegExp(r'\.bpc\.json$|\.json$'), '');
-      await ref
-          .read(scriptStorageProvider)
-          .importFromString(text, fallbackName: fallback);
+      final bytes = await f.readAsBytes();
+      final fallback = f.name.replaceAll(
+        RegExp(r'\.bpc\.zip$|\.zip$|\.bpc\.json$|\.json$', caseSensitive: false),
+        '',
+      );
+      final pkg = ScriptPackage();
+      final result = ScriptPackage.isZipBytes(bytes)
+          ? await pkg.importZip(bytes, fallbackName: fallback)
+          : await pkg.importJson(
+              utf8.decode(bytes, allowMalformed: true),
+              fallbackName: fallback,
+            );
       await ref.read(scriptListProvider.notifier).refresh();
       if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('导入成功')));
+      ).showSnackBar(SnackBar(content: Text(_importSummary(result))));
+    } on PackageException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导入失败：${e.message}')));
     } catch (_) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('导入失败：文件不是有效的脚本 JSON')));
+      ).showSnackBar(const SnackBar(content: Text('导入失败：文件不是有效的脚本或脚本包')));
     }
   }
 
@@ -374,7 +392,7 @@ class _ScriptList extends ConsumerWidget {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  '还没有脚本，点击右上角「新建」创建第一个蓝图，或导入 .bpc.json 文件',
+                  '还没有脚本，点击右上角「新建」创建第一个蓝图，或导入 .bpc.zip / .bpc.json 文件',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: AppColors.inkSecondary, fontSize: 13),
                 ),
@@ -531,12 +549,64 @@ class _ScriptRow extends ConsumerWidget {
     ).showSnackBar(const SnackBar(content: Text('已复制脚本')));
   }
 
+  /// 导出为 ZIP 包（内嵌被引用的录制与模板图片）
   Future<void> _export(BuildContext context, WidgetRef ref) async {
-    final p = await getSaveLocation(suggestedName: '${script.name}.bpc.json');
+    final PackageBuildResult result;
+    try {
+      result = await ScriptPackage().build(script);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导出失败：$e')));
+      return;
+    }
+    if (!result.missing.isEmpty) {
+      if (!context.mounted) return;
+      final cont = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('存在缺失的录制/模板'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('以下引用在本机找不到，导出后对应节点可能无法执行：'),
+                const SizedBox(height: 8),
+                for (final id in result.missing.recordings)
+                  Text('录制：$id', style: const TextStyle(fontSize: 12)),
+                for (final t in result.missing.templates)
+                  Text('模板：$t', style: const TextStyle(fontSize: 12)),
+                const SizedBox(height: 8),
+                const Text('继续导出将只打包已存在的项，蓝图中的引用会原样保留。'),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('继续导出'),
+            ),
+          ],
+        ),
+      );
+      if (cont != true) return;
+    }
+    if (!context.mounted) return;
+    final p = await getSaveLocation(
+      suggestedName: '${script.name}.bpc.zip',
+      acceptedTypeGroups: const [
+        XTypeGroup(label: '脚本包', extensions: ['zip']),
+      ],
+    );
     if (p == null || !context.mounted) return;
     try {
-      final json = await ref.read(scriptStorageProvider).exportToString(script);
-      await File(p.path).writeAsString(json);
+      await File(p.path).writeAsBytes(result.bytes, flush: true);
       if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -577,6 +647,22 @@ class _ScriptRow extends ConsumerWidget {
       ref.read(currentScriptProvider.notifier).close();
     }
   }
+}
+
+String _importSummary(PackageImportResult r) {
+  final parts = <String>[
+    if (r.recordingsAdded > 0) '录制新增 ${r.recordingsAdded}',
+    if (r.recordingsReused > 0) '录制复用 ${r.recordingsReused}',
+    if (r.recordingsRemapped > 0) '录制重映射 ${r.recordingsRemapped}',
+    if (r.templatesAdded > 0) '模板新增 ${r.templatesAdded}',
+    if (r.templatesReused > 0) '模板复用 ${r.templatesReused}',
+  ];
+  final detail = parts.isEmpty ? '' : '（${parts.join('，')}）';
+  final dangling = r.hasDangling
+      ? '；仍有 ${r.danglingRecordings.length} 个录制、'
+            '${r.danglingTemplates.length} 个模板在本机找不到'
+      : '';
+  return '导入成功：${r.scriptName}$detail$dangling';
 }
 
 String _fmtTime(DateTime t) {
