@@ -184,8 +184,8 @@ void main() {
       ];
       expect(
         notes.length,
-        7,
-        reason: '图像/目标文本 2 输入 + 文本/是否命中/坐标X/坐标Y/成功 5 输出',
+        6,
+        reason: '图像/目标文本 2 输入 + 文本/是否命中/坐标X/坐标Y 4 输出',
       );
       // 执行流端口一律不写说明
       expect(
@@ -200,13 +200,13 @@ void main() {
       expect(y.note, contains('目标文字中心'));
     });
 
-    test('图像识别数据端口说明 6 条，x/y 描述命中中心', () {
+    test('图像识别数据端口说明 5 条，x/y 描述命中中心', () {
       final def = nodeDef('imageMatch');
       final notes = [
         ...def.inputs.where((p) => p.note != null),
         ...def.outputs.where((p) => p.note != null),
       ];
-      expect(notes.length, 6);
+      expect(notes.length, 5);
       final x = def.outputs.firstWhere((p) => p.key == 'x');
       final y = def.outputs.firstWhere((p) => p.key == 'y');
       expect(x.note, contains('中心'));
@@ -230,12 +230,12 @@ void main() {
       expect(dataOuts.single.note, isNotNull, reason: '输出端口带用法说明');
     });
 
-    test('数据保存：文本/图像双数据输入 + 文本/图像/成功输出，带说明', () {
+    test('数据保存：文本/图像双数据输入 + 文本/图像输出，带说明', () {
       final def = nodeDef('saveData');
       final dataIns = def.inputs.where((p) => p.kind == PortKind.data).toList();
       expect(dataIns.map((p) => p.key), ['text', 'image']);
       final dataOuts = def.outputs.where((p) => p.kind == PortKind.data).toList();
-      expect(dataOuts.map((p) => p.key), ['textOut', 'imageOut', 'success']);
+      expect(dataOuts.map((p) => p.key), ['textOut', 'imageOut']);
       // 数据端口全部带说明（端口即文档）
       expect(
         [...dataIns, ...dataOuts].every((p) => p.note != null && p.note!.isNotEmpty),
@@ -266,19 +266,18 @@ void main() {
       expect(input.note, isNotNull, reason: '输入端口带用法说明');
     });
 
-    test('OCR 数据输出为 文本/是否命中/坐标X/坐标Y/成功', () {
+    test('OCR 数据输出为 文本/是否命中/坐标X/坐标Y', () {
       final def = nodeDef('ocr');
       final dataOuts = def.outputs.where((p) => p.kind == PortKind.data).toList();
-      expect(dataOuts.map((p) => p.key), ['text', 'found', 'x', 'y', 'success']);
+      expect(dataOuts.map((p) => p.key), ['text', 'found', 'x', 'y']);
       final found = dataOuts[1];
       expect(found.label, '是否命中');
       expect(found.note, contains('目标文本'));
       expect(dataOuts[2].label, '坐标X');
       expect(dataOuts[3].label, '坐标Y');
-      expect(dataOuts[4].label, '成功');
     });
 
-    test('imageMatch：模板/阈值 + 两角点区域参数，输出含成功', () {
+    test('imageMatch：模板/阈值 + 两角点区域参数，输出含相似度', () {
       final def = nodeDef('imageMatch');
       expect(def.params.map((f) => f.key), [
         'templatePath',
@@ -290,7 +289,7 @@ void main() {
         'bottom',
       ]);
       final dataOuts = def.outputs.where((p) => p.kind == PortKind.data).toList();
-      expect(dataOuts.map((p) => p.key), ['found', 'x', 'y', 'score', 'success']);
+      expect(dataOuts.map((p) => p.key), ['found', 'x', 'y', 'score']);
       final x = dataOuts.firstWhere((p) => p.key == 'x');
       final y = dataOuts.firstWhere((p) => p.key == 'y');
       expect(x.label, '坐标X');

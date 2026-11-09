@@ -1160,21 +1160,7 @@ void main() {
     });
   });
 
-  group('success 输出（失败不中断执行流）', () {
-    test('图像识别：未选择模板 success=false，正常未命中仍为 true', () async {
-      final s = _build([
-        _node('a', 'start'),
-        _node('im', 'imageMatch', {'templatePath': ''}),
-        _node('copy', 'setVar', {'name': 'ok', 'const': ''}),
-      ], [
-        _edge('e1', 'a', 'out', 'im', 'in'),
-        _edge('e2', 'im', 'out', 'copy', 'in'),
-        _edge('d1', 'im', 'success', 'copy', 'value', kind: EdgeKind.data),
-      ]);
-      final vars = await _run(s);
-      expect(vars['ok'], false);
-    });
-
+  group('success 输出（仅执行录制保留）', () {
     test('执行录制：找不到录制 success=false 且继续执行', () async {
       final s = _build([
         _node('a', 'start'),
@@ -1184,20 +1170,6 @@ void main() {
         _edge('e1', 'a', 'out', 'pr', 'in'),
         _edge('e2', 'pr', 'out', 'copy', 'in'),
         _edge('d1', 'pr', 'success', 'copy', 'value', kind: EdgeKind.data),
-      ]);
-      final vars = await _run(s);
-      expect(vars['ok'], false);
-    });
-
-    test('设置变量：变量名为空 success=false', () async {
-      final s = _build([
-        _node('a', 'start'),
-        _node('sv', 'setVar', {'name': '', 'const': 'x'}),
-        _node('copy', 'setVar', {'name': 'ok', 'const': ''}),
-      ], [
-        _edge('e1', 'a', 'out', 'sv', 'in'),
-        _edge('e2', 'sv', 'out', 'copy', 'in'),
-        _edge('d1', 'sv', 'success', 'copy', 'value', kind: EdgeKind.data),
       ]);
       final vars = await _run(s);
       expect(vars['ok'], false);
@@ -1247,7 +1219,7 @@ void main() {
       expect(auto.regions.last, isNull, reason: 'useRegion=false 时忽略角点数据边');
     });
 
-    test('截图：区域无效 success=false，imageOut 为空', () async {
+    test('截图：区域无效时 imageOut 为空，继续执行', () async {
       final s = _build([
         _node('a', 'start'),
         _node('shot', 'screenshot', {
@@ -1257,15 +1229,16 @@ void main() {
           'right': 100,
           'bottom': 300,
         }),
-        _node('copy', 'setVar', {'name': 'ok', 'const': ''}),
+        _node('copy', 'setVar', {'name': 'img', 'const': 'x'}),
       ], [
         _edge('e1', 'a', 'out', 'shot', 'in'),
         _edge('e2', 'shot', 'out', 'copy', 'in'),
-        _edge('d1', 'shot', 'success', 'copy', 'value', kind: EdgeKind.data),
+        _edge('d1', 'shot', 'imageOut', 'copy', 'value', kind: EdgeKind.data),
       ]);
       final hooks = Hooks();
       final vars = await _run(s, hooks: hooks);
-      expect(vars['ok'], false);
+      // imageOut 为空 → 下游拿不到数据，回退到常量 'x'（证明图像输出为空）
+      expect(vars['img'], 'x');
       expect(hooks.logs.join(), contains('区域无效'));
     });
   });

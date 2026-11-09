@@ -186,7 +186,6 @@ class BlueprintInterpreter {
 
       case 'screenshot':
         {
-          _writeOut(n, 'success', false);
           final region = await _resolveRegion(script, n);
           if (region.enabled && !region.valid) {
             hooks.log('截图失败：区域无效（宽或高为 0）');
@@ -198,7 +197,6 @@ class BlueprintInterpreter {
           _lastImage = await _captureNow(region: region.rect);
           _portValues[PortRef(nodeId: n.id, port: 'imageOut')] = _lastImage;
           final ok = _lastImage != null;
-          _writeOut(n, 'success', ok);
           hooks.log(
               '截图 ${ok ? '${_lastImage!.width}×${_lastImage!.height}' : '失败'}');
           return 'out';
@@ -206,7 +204,6 @@ class BlueprintInterpreter {
 
       case 'ocr':
         {
-          _writeOut(n, 'success', false);
           final region = await _resolveRegion(script, n);
           if (region.enabled && !region.valid) {
             hooks.log('OCR 失败：区域无效（宽或高为 0）');
@@ -256,14 +253,12 @@ class BlueprintInterpreter {
           _writeOut(n, 'found', found);
           _writeOut(n, 'x', cx);
           _writeOut(n, 'y', cy);
-          _writeOut(n, 'success', true);
           hooks.log('OCR: "${_brief(res.text)}"');
           return 'out';
         }
 
       case 'imageMatch':
         {
-          _writeOut(n, 'success', false);
           final tplPath = (n.params['templatePath'] as String?)?.trim() ?? '';
           if (tplPath.isEmpty) {
             hooks.log('图像识别失败：未选择模板图片');
@@ -296,7 +291,6 @@ class BlueprintInterpreter {
           final fullX = imgX + r.x;
           final fullY = imgY + r.y;
           _setFound(n, r.found, x: fullX, y: fullY, score: r.score);
-          _writeOut(n, 'success', true);
           hooks.log(
               '图像识别: ${r.found ? "命中" : "未命中"} score=${r.score.toStringAsFixed(3)} pos=($fullX,$fullY)');
           return 'out';
@@ -343,7 +337,6 @@ class BlueprintInterpreter {
 
       case 'setVar':
         {
-          _writeOut(n, 'success', false);
           final name = ((n.params['name'] as String?) ?? '').trim();
           if (name.isEmpty) {
             hooks.log('设置变量失败：变量名为空');
@@ -352,7 +345,6 @@ class BlueprintInterpreter {
           final value = await _resolveInput(script, n, 'value', 'const');
           vars[name] = value is String ? VariableTable.parseLiteral(value) : (value ?? '');
           _writeOut(n, 'valueOut', vars[name]);
-          _writeOut(n, 'success', true);
           hooks.log('变量 $name = ${_brief(vars[name])}');
           return 'out';
         }
@@ -380,7 +372,6 @@ class BlueprintInterpreter {
 
       case 'saveData':
         {
-          _writeOut(n, 'success', false);
           // 透传输出（与保存成败解耦：数据继续流给下游使用）
           final imgEdge = script.inEdges(n.id, 'image', kind: EdgeKind.data);
           final imgValue = imgEdge.isNotEmpty
@@ -414,7 +405,6 @@ class BlueprintInterpreter {
             hooks.log('数据保存：未连接文本/图像输入，未保存文件');
             return 'out';
           }
-          _writeOut(n, 'success', true);
           return 'out';
         }
 
@@ -799,13 +789,12 @@ class BlueprintInterpreter {
     return num.tryParse('${p ?? ''}'.trim());
   }
 
-  /// OCR 失败时统一写空输出（success=false）
+  /// OCR 失败时统一写空输出
   void _writeOcrFailure(BPNode n) {
     _writeOut(n, 'text', '');
     _writeOut(n, 'found', false);
     _writeOut(n, 'x', -1);
     _writeOut(n, 'y', -1);
-    _writeOut(n, 'success', false);
   }
 
   String _compareOpLabel(String op) => switch (op) {

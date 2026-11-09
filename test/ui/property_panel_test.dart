@@ -294,7 +294,7 @@ void main() {
       );
     });
 
-    testWidgets('截图节点：端口说明包含区域角点输入与图像/成功输出', (tester) async {
+    testWidgets('截图节点：端口说明包含区域角点输入与图像输出', (tester) async {
       addAndSelect('screenshot', 's1');
       await pumpPanel(tester);
       await tester.scrollUntilVisible(

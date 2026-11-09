@@ -513,7 +513,6 @@ final List<NodeTypeDef> kNodeTypes = [
         dataType: kPortTypeImage,
         note: '截取的屏幕图像，可连接「文字识别/图像识别」的图像输入',
       ),
-      _outData('success', '成功', note: '截屏成功输出 true；区域无效或截屏失败输出 false'),
     ],
     params: _cornerFields,
   ),
@@ -548,7 +547,6 @@ final List<NodeTypeDef> kNodeTypes = [
       _outData('found', '是否命中', note: '识别文本是否包含「目标文本」；目标文本为空时 = 识别文本非空'),
       _outData('x', '坐标X', note: '目标文字中心 X；目标文本为空时为区域中心；未命中目标时为 -1'),
       _outData('y', '坐标Y', note: '目标文字中心 Y；目标文本为空时为区域中心；未命中目标时为 -1'),
-      _outData('success', '成功', note: '正常完成识别输出 true；无可用图像或区域无效输出 false'),
     ],
     params: [
       ..._cornerFields,
@@ -584,7 +582,6 @@ final List<NodeTypeDef> kNodeTypes = [
       _outData('x', '坐标X', note: '命中区域中心在屏幕上的 X 坐标（未命中时为最佳匹配位置；区域模式时含区域偏移）'),
       _outData('y', '坐标Y', note: '命中区域中心在屏幕上的 Y 坐标（未命中时为最佳匹配位置；区域模式时含区域偏移）'),
       _outData('score', '相似度', note: '相似度得分（0.0~1.0，越接近 1 越相似）'),
-      _outData('success', '成功', note: '正常完成匹配输出 true；未选择模板/模板加载失败/无可用图像/区域无效输出 false'),
     ],
     params: [
       ParamFieldDef(
@@ -700,7 +697,6 @@ final List<NodeTypeDef> kNodeTypes = [
     outputs: [
       _outExec(),
       _outData('valueOut', '值'),
-      _outData('success', '成功', note: '变量名非空并成功写入输出 true；变量名为空输出 false'),
     ],
     params: [
       ParamFieldDef('name', '变量名', ParamType.varName, defaultValue: 'myVar'),
@@ -781,7 +777,6 @@ final List<NodeTypeDef> kNodeTypes = [
         dataType: kPortTypeImage,
         note: '透传所连接的「图像」输入数据，保存后可继续连线给下游节点',
       ),
-      _outData('success', '成功', note: '成功保存至少一个文件输出 true；文件名为空或未连接文本/图像输入输出 false'),
     ],
     params: [
       ParamFieldDef(
