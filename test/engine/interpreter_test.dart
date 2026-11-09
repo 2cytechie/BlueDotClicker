@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -138,16 +139,20 @@ class MockRecognition implements RecognitionService {
       const MatchResult(true, 50, 60, 0.95);
 }
 
-/// 测试钩子集合：捕获日志/节点高亮，支持注入录制
+/// 测试钩子集合：捕获日志/节点高亮，支持注入录制与「等待帧」钩子
 class Hooks {
+  Hooks({this.yieldToFrame});
+
   final List<String> logs = [];
   final List<String?> nodeChanges = [];
   Recording? recording;
+  final Future<void> Function()? yieldToFrame;
 
   late final EngineHooks engineHooks = EngineHooks(
     log: logs.add,
     onNodeChange: nodeChanges.add,
     loadRecording: (id) async => id == recording?.id ? recording : null,
+    yieldToFrame: yieldToFrame,
   );
 }
 
@@ -865,6 +870,230 @@ void main() {
       Future<void>.delayed(const Duration(milliseconds: 120), engine.stop);
       await engine.run(s);
       expect(engine.isRunning, isFalse);
+    });
+
+    test('循环体无延时时事件循环不被饿死，stop 仍可终止', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('loop', 'loop', {
+          'op': '==',
+          'leftConst': '1',
+          'rightConst': '1',
+          'maxIterations': 0,
+        }),
+        // 循环体只有同步节点、没有延时/IO：若不让出事件循环，下面的定时器永不触发
+        _node('inc', 'setVar', {'name': 'n', 'const': '1'}),
+      ], [
+        _edge('e1', 'a', 'out', 'loop', 'in'),
+        _edge('e2', 'loop', 'true', 'inc', 'in'),
+      ]);
+      final hooks = Hooks();
+      final engine = BlueprintInterpreter(
+        automation: MockAutomation(),
+        recognition: MockRecognition(),
+        hooks: hooks.engineHooks,
+      );
+      Future<void>.delayed(const Duration(milliseconds: 120), engine.stop);
+      await engine.run(s);
+      expect(engine.isRunning, isFalse);
+      expect(hooks.logs.join(), contains('■ 已停止'));
+    });
+
+    test('循环体连回 in：每轮只执行一次，假出口只执行一次', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('set0', 'setVar', {'name': 'count', 'const': '0'}),
+        _node('exit0', 'setVar', {'name': 'exitCount', 'const': '0'}),
+        _node('loop', 'loop', {
+          'op': '<',
+          'leftConst': '0',
+          'rightConst': '3',
+          'maxIterations': 20,
+        }),
+        _node('get', 'getVar', {'name': 'count'}),
+        _node('add', 'add', {'a': 0, 'b': 1}),
+        _node('set2', 'setVar', {'name': 'count', 'const': ''}),
+        _node('getExit', 'getVar', {'name': 'exitCount'}),
+        _node('addExit', 'add', {'a': 0, 'b': 1}),
+        _node('setExit', 'setVar', {'name': 'exitCount', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'set0', 'in'),
+        _edge('e2', 'set0', 'out', 'exit0', 'in'),
+        _edge('e3', 'exit0', 'out', 'loop', 'in'),
+        _edge('e4', 'loop', 'true', 'add', 'in'),
+        _edge('e5', 'add', 'out', 'set2', 'in'),
+        // 旧写法：循环体链尾连回循环输入口
+        _edge('e6', 'set2', 'out', 'loop', 'in'),
+        _edge('e7', 'loop', 'false', 'addExit', 'in'),
+        _edge('e8', 'addExit', 'out', 'setExit', 'in'),
+        _edge('d1', 'get', 'value', 'add', 'a', kind: EdgeKind.data),
+        _edge('d2', 'add', 'result', 'set2', 'value', kind: EdgeKind.data),
+        _edge('d3', 'set2', 'valueOut', 'loop', 'left', kind: EdgeKind.data),
+        _edge('d4', 'getExit', 'value', 'addExit', 'a', kind: EdgeKind.data),
+        _edge('d5', 'addExit', 'result', 'setExit', 'value', kind: EdgeKind.data),
+      ]);
+      final vars = await _run(s);
+      expect(vars['count'], 3, reason: '回边只结束本轮循环体，不应递归叠加轮次');
+      expect(
+        vars['exitCount'],
+        1,
+        reason: '假出口只执行一次，不能随嵌套层数重复执行',
+      );
+    });
+
+    test('循环条件数据源一直未产出：告警一次并回退常量', () async {
+      final s = _build([
+        _node('a', 'start'),
+        // 未接入执行流的数据节点：其输出端口永远没有缓存值
+        _node('src', 'setVar', {'name': 'flag', 'const': 'x'}),
+        _node('loop', 'loop', {
+          'op': 'notContains',
+          'leftConst': 'abc',
+          'rightConst': 'zzz',
+          'maxIterations': 3,
+        }),
+        _node('body', 'setVar', {'name': 'tick', 'const': '1'}),
+        _node('done', 'setVar', {'name': 'done', 'const': 'yes'}),
+      ], [
+        _edge('e1', 'a', 'out', 'loop', 'in'),
+        _edge('e2', 'loop', 'true', 'body', 'in'),
+        _edge('e3', 'loop', 'false', 'done', 'in'),
+        _edge('d1', 'src', 'valueOut', 'loop', 'left', kind: EdgeKind.data),
+      ]);
+      final hooks = Hooks();
+      final vars = await _run(s, hooks: hooks);
+      final warns =
+          hooks.logs.where((l) => l.contains('数据源一直未产出')).toList();
+      expect(warns.length, 1, reason: '同一端口每次运行只告警一次');
+      expect(vars['tick'], 1, reason: '回退常量后条件成立，循环体正常执行');
+      expect(vars['done'], 'yes', reason: '达到安全阀后走假出口');
+    });
+
+    test('循环体无延时：每轮之间真实让出事件循环（定时器持续触发）', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('loop', 'loop', {
+          'op': '==',
+          'leftConst': '1',
+          'rightConst': '1',
+          'maxIterations': 30,
+        }),
+        _node('inc', 'setVar', {'name': 'n', 'const': '1'}),
+      ], [
+        _edge('e1', 'a', 'out', 'loop', 'in'),
+        _edge('e2', 'loop', 'true', 'inc', 'in'),
+      ]);
+      var ticks = 0;
+      final timer = Timer.periodic(const Duration(milliseconds: 2), (_) {
+        ticks++;
+      });
+      addTearDown(timer.cancel);
+
+      await _run(s);
+      // 30 轮、每轮至少 1ms 真实定时器让步：2ms 定时器必然能多次执行。
+      // 修复前零时长定时器会让事件队列永远排不到期，ticks 恒为 0。
+      expect(
+        ticks,
+        greaterThan(3),
+        reason: '循环期间事件任务必须有机会执行，否则界面会冻结、F10 失效',
+      );
+    });
+
+    test('循环间隙调用 yieldToFrame 钩子（UI 层按帧让出）', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('loop', 'loop', {
+          'op': '==',
+          'leftConst': '1',
+          'rightConst': '1',
+          'maxIterations': 60,
+        }),
+        _node('inc', 'setVar', {'name': 'n', 'const': '1'}),
+      ], [
+        _edge('e1', 'a', 'out', 'loop', 'in'),
+        _edge('e2', 'loop', 'true', 'inc', 'in'),
+      ]);
+      var frames = 0;
+      final hooks = Hooks(
+        yieldToFrame: () async {
+          frames++;
+        },
+      );
+      await _run(s, hooks: hooks);
+      expect(
+        frames,
+        greaterThanOrEqualTo(2),
+        reason: '60 轮无延时循环跨越多帧间隔，必须等待真实帧而不是满速空转',
+      );
+    });
+
+    test('快速空转的循环可以及时停止', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('loop', 'loop', {
+          'op': '==',
+          'leftConst': '1',
+          'rightConst': '1',
+          'maxIterations': 0,
+        }),
+        _node('inc', 'setVar', {'name': 'n', 'const': '1'}),
+      ], [
+        _edge('e1', 'a', 'out', 'loop', 'in'),
+        _edge('e2', 'loop', 'true', 'inc', 'in'),
+      ]);
+      final engine = BlueprintInterpreter(
+        automation: MockAutomation(),
+        recognition: MockRecognition(),
+        hooks: Hooks().engineHooks,
+      );
+      final sw = Stopwatch()..start();
+      Future<void>.delayed(const Duration(milliseconds: 30), engine.stop);
+      await engine.run(s);
+      sw.stop();
+      expect(engine.isRunning, isFalse);
+      expect(
+        sw.elapsedMilliseconds,
+        lessThan(1000),
+        reason: '停止请求应在下一轮让步时立即生效，不能被空转拖住',
+      );
+    });
+
+    test('循环体内死路不再每轮清空节点高亮', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('loop', 'loop', {
+          'op': '==',
+          'leftConst': '1',
+          'rightConst': '1',
+          'maxIterations': 3,
+        }),
+        _node('body', 'setVar', {'name': 'n', 'const': '1'}),
+      ], [
+        _edge('e1', 'a', 'out', 'loop', 'in'),
+        // 循环体走到这里即死路（用户蓝图里"条件为假"分支断开的情形）
+        _edge('e2', 'loop', 'true', 'body', 'in'),
+      ]);
+      final hooks = Hooks();
+      await _run(s, hooks: hooks);
+      final clears = hooks.nodeChanges.where((id) => id == null).length;
+      expect(clears, 1, reason: '只在运行结束时清空一次，循环内不应每轮 null ↔ 节点往返');
+    });
+
+    test('长执行链每 256 步让出一次事件循环', () async {
+      // 600 个同步节点组成的线性链：只在微任务里 await 会整段跑完不抬头
+      final nodes = <BPNode>[_node('a', 'start')];
+      final edges = <BPEdge>[_edge('e0', 'a', 'out', 's0', 'in')];
+      for (var i = 0; i < 600; i++) {
+        nodes.add(_node('s$i', 'setVar', {'name': 'v$i', 'const': '1'}));
+        if (i > 0) edges.add(_edge('e$i', 's${i - 1}', 'out', 's$i', 'in'));
+      }
+      var ticks = 0;
+      final timer = Timer.periodic(const Duration(milliseconds: 1), (_) {
+        ticks++;
+      });
+      addTearDown(timer.cancel);
+      await _run(_build(nodes, edges));
+      expect(ticks, greaterThanOrEqualTo(1), reason: '长链必须周期性让出事件循环');
     });
 
     test('已移除的节点类型：记日志并中断执行流，不抛异常', () async {

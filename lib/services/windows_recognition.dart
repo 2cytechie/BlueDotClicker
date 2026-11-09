@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:path_provider/path_provider.dart';
 import 'package:winrt_ocr_flutter/winrt_ocr_flutter.dart';
 
+import 'isolate_matcher.dart';
 import 'opencv_matcher.dart';
 import 'recognition.dart';
 import 'template_match_dart.dart';
@@ -12,15 +13,27 @@ import 'template_match_dart.dart';
 /// Windows 识别服务：OCR 用 Windows.Media.Ocr（winrt_ocr_flutter），
 /// 模板匹配优先 OpenCV（opencv_dart，TM_CCOEFF_NORMED），
 /// OpenCV 原生库不可用时自动回退纯 Dart 金字塔 NCC。
+///
+/// 模板匹配优先交给后台 isolate（[IsolateTemplateMatcher]）：匹配在循环轮询
+/// 中每秒可能调用数十次，放在 UI 线程会直接卡住帧渲染。后台不可用时回退主线程。
 class WindowsRecognitionService implements RecognitionService {
-  WindowsRecognitionService();
+  WindowsRecognitionService({void Function(String message)? log})
+    : _isolateMatcher = IsolateTemplateMatcher(
+        onDisabled: log == null
+            ? null
+            : (reason) => log('图像识别后台 isolate 不可用，已回退主线程：$reason'),
+      );
 
   /// OCR 位图相对输入图像的放大倍数（当前不做放大，词框直接为原图像素）。
   static const double ocrScaleFactor = 1.0;
 
+  final IsolateTemplateMatcher _isolateMatcher;
   final DartTemplateMatcher _dartMatcher = const DartTemplateMatcher();
   final OpenCvMatcher _cvMatcher = const OpenCvMatcher();
   bool? _opencvAvailable;
+
+  /// 释放后台匹配 isolate（幂等）
+  void dispose() => _isolateMatcher.dispose();
 
   @override
   bool get isAvailable => Platform.isWindows;
@@ -74,6 +87,11 @@ class WindowsRecognitionService implements RecognitionService {
 
   @override
   Future<MatchResult> matchTemplate(RawImage image, RawImage template, {double threshold = 0.8}) async {
+    // 1) 后台 isolate：OpenCV → 纯 Dart 的降级链在 worker 内部完成
+    final offloaded =
+        await _isolateMatcher.tryMatch(image, template, threshold: threshold);
+    if (offloaded != null) return offloaded;
+    // 2) 后台不可用：保持原语义（主线程 OpenCV → 纯 Dart，失败结果已缓存）
     if (_opencvAvailable ?? true) {
       try {
         final r = _cvMatcher.match(image, template, threshold: threshold);

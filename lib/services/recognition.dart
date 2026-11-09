@@ -50,11 +50,12 @@ class RawImage {
     return g;
   }
 
-  /// 解码为 dart:ui Image（RGBA）
+  /// 解码为 dart:ui Image：字节本来就是 BGRA，直接按 bgra8888 解码，
+  /// 省掉一次整图像素重排（1080p 约 370 万次迭代）。
   Future<ui.Image> toImage() async {
-    final buf = await ui.ImmutableBuffer.fromUint8List(_rgba());
+    final buf = await ui.ImmutableBuffer.fromUint8List(bgra);
     final descriptor =
-        ui.ImageDescriptor.raw(buf, width: width, height: height, pixelFormat: ui.PixelFormat.rgba8888);
+        ui.ImageDescriptor.raw(buf, width: width, height: height, pixelFormat: ui.PixelFormat.bgra8888);
     final codec = await descriptor.instantiateCodec();
     final frame = await codec.getNextFrame();
     codec.dispose();
@@ -74,16 +75,6 @@ class RawImage {
     }
   }
 
-  Uint8List _rgba() {
-    final rgba = Uint8List(bgra.length);
-    for (var i = 0; i < bgra.length; i += 4) {
-      rgba[i] = bgra[i + 2];
-      rgba[i + 1] = bgra[i + 1];
-      rgba[i + 2] = bgra[i];
-      rgba[i + 3] = bgra[i + 3];
-    }
-    return rgba;
-  }
 }
 
 /// 识别服务抽象接口（OCR / 模板匹配）。Windows 实现 Phase 1，Android 为 Phase 2。

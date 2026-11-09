@@ -1,4 +1,5 @@
 import 'package:fl_nodes_v2/fl_nodes_v2.dart' as fl;
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,16 +9,75 @@ import '../../models/node_types.dart';
 import '../../state/providers.dart';
 
 /// 生成 NodeEditor.nodeBuilder 回调；运行中节点以孔雀蓝发光高亮。
-/// [runningNodeId] 由编辑器页捕获 runnerProvider 状态后传入。
-fl.NodeWidgetBuilder nodeBodyBuilder({String? runningNodeId}) =>
-    (context, node, state) => _NodeBodyContent(
-      node: node,
-      def: nodeDef(node.type),
-      categoryColor: nodeDef(node.type).category.color,
-      selected: state.isSelected,
-      highlight: node.id == runningNodeId,
-      connectedPorts: state.connectedPorts,
+/// [runningNode] 为运行中节点 id 的通知器：只重建高亮状态翻转的节点体，
+/// 避免节点切换时整页/整张画布重建。
+fl.NodeWidgetBuilder nodeBodyBuilder({ValueListenable<String?>? runningNode}) =>
+    (context, node, state) => _NodeHighlight(
+      runningNode: runningNode,
+      nodeId: node.id,
+      builder: (highlight) => _NodeBodyContent(
+        node: node,
+        def: nodeDef(node.type),
+        categoryColor: nodeDef(node.type).category.color,
+        selected: state.isSelected,
+        highlight: highlight,
+        connectedPorts: state.connectedPorts,
+      ),
     );
+
+/// 高亮订阅器：仅在自身高亮状态翻转时重建（其余节点不受影响）
+class _NodeHighlight extends StatefulWidget {
+  const _NodeHighlight({
+    required this.runningNode,
+    required this.nodeId,
+    required this.builder,
+  });
+
+  final ValueListenable<String?>? runningNode;
+  final String nodeId;
+  final Widget Function(bool highlight) builder;
+
+  @override
+  State<_NodeHighlight> createState() => _NodeHighlightState();
+}
+
+class _NodeHighlightState extends State<_NodeHighlight> {
+  bool _highlight = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _highlight = widget.runningNode?.value == widget.nodeId;
+    widget.runningNode?.addListener(_onChanged);
+  }
+
+  @override
+  void didUpdateWidget(_NodeHighlight oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.runningNode, widget.runningNode) &&
+        oldWidget.nodeId == widget.nodeId) {
+      return;
+    }
+    oldWidget.runningNode?.removeListener(_onChanged);
+    _highlight = widget.runningNode?.value == widget.nodeId;
+    widget.runningNode?.addListener(_onChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.runningNode?.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  void _onChanged() {
+    final next = widget.runningNode?.value == widget.nodeId;
+    if (next == _highlight) return;
+    setState(() => _highlight = next);
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(_highlight);
+}
 
 class _NodeBodyContent extends StatelessWidget {
   const _NodeBodyContent({

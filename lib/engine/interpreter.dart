@@ -20,10 +20,16 @@ class EngineHooks {
 
   /// 按 id 加载录制（「执行录制」节点用），找不到返回 null
   final Future<Recording?> Function(String id) loadRecording;
+
+  /// 协作让出钩子：等待下一帧（UI 层实现，自带超时）后完成。
+  /// 纯 Dart 单元测试不注入（null），引擎回退为真实定时器让步。
+  final Future<void> Function()? yieldToFrame;
+
   const EngineHooks({
     required this.log,
     required this.onNodeChange,
     this.loadRecording = _defaultLoadRecording,
+    this.yieldToFrame,
   });
 
   static Future<Recording?> _defaultLoadRecording(String id) async => null;
@@ -68,6 +74,28 @@ class BlueprintInterpreter {
   /// 组合键执行中尚未抬起的按键：停止或异常结束时统一释放，避免卡住用户桌面
   final Set<int> _pressedKeys = {};
 
+  /// 正在执行的循环节点 id：循环体若经执行流连回同一循环节点，
+  /// 视为本轮循环体结束（避免递归嵌套与「假」出口重复执行）。
+  final Set<String> _activeLoops = {};
+
+  /// 最近一次通知 UI 的高亮节点：同一节点连续执行不重复通知
+  String? _notifiedNodeId;
+
+  /// 单次协作让步至少等待的真实定时器时长。必须 > 0：零时长定时器会让
+  /// 定时器堆始终有到期任务，端口的消息（帧回调、F10 轮询）永远排不上队，
+  /// 这是「无限循环时界面冻结」的根因。
+  static const int kMinCoopDelayMs = 1;
+
+  /// 两次「等待帧」之间允许的最大墙钟间隔（约一帧）。间隔内只做定时器让步，
+  /// 这样纯计算的循环不会被压到 60 轮/秒，而界面仍能按帧刷新。
+  static const int kFrameYieldIntervalMs = 16;
+
+  /// `_exec` 长链每执行多少步让步一次（覆盖循环体外部的长链/自环）。
+  static const int kStepsPerYield = 256;
+
+  /// 距上次等待帧的时间：用于把快速空转的循环压到约每帧一轮
+  final Stopwatch _frameWatch = Stopwatch()..start();
+
   bool get isRunning => _running;
 
   void stop() => _stopped = true;
@@ -81,6 +109,9 @@ class BlueprintInterpreter {
     _portValues.clear();
     _warnedNodes.clear();
     _pressedKeys.clear();
+    _activeLoops.clear();
+    _notifiedNodeId = null;
+    _frameWatch.reset();
     try {
       final start = script.findStart();
       if (start == null) {
@@ -100,6 +131,9 @@ class BlueprintInterpreter {
         _portValues.clear();
         _lastImage = null;
         await _exec(script, start, 'enter');
+        // 还有下一轮时才需要让出：多轮执行（含 count=0 一直执行）之间若不让出，
+        // 「开始→短链」会以微任务/零时长定时器连续空转，饿死帧回调与 F10 轮询。
+        if (!_stopped && (forever || round < count)) await _cooperate();
       }
       hooks.log(_stopped ? '■ 已停止' : '✓ 执行完成');
     } on UnsupportedError catch (e) {
@@ -108,7 +142,8 @@ class BlueprintInterpreter {
       hooks.log('✗ 执行异常：$e');
     } finally {
       await _releaseHeldInputs();
-      hooks.onNodeChange(null);
+      _notifyNode(null);
+      _activeLoops.clear();
       _running = false;
     }
   }
@@ -123,15 +158,24 @@ class BlueprintInterpreter {
         hooks.log('✗ 执行步数超限，疑似死循环，已终止');
         return;
       }
+      // 长链（尤其是循环体内的自环/回边）也要周期性让出，不能只依赖循环节点：
+      // 纯同步节点的 await 只会排微任务，10 万步上限兜底前界面早已冻住。
+      if (steps % kStepsPerYield == 0) await _cooperate();
       final n = current;
       final inPort = currentPort;
-      hooks.onNodeChange(n.id);
+      // 循环体经执行流连回了同一循环节点：视为本轮循环体结束，
+      // 交回 _executeLoop 重新判定条件（避免递归嵌套与假出口重复执行）
+      if (_activeLoops.contains(n.id)) return;
+      _notifyNode(n.id);
       final outKey = await _execute(script, n, inPort);
       if (_stopped) return;
       // 找到下一个执行节点
       final edges = script.outEdges(n.id, outKey, kind: EdgeKind.exec);
       if (edges.isEmpty) {
-        hooks.onNodeChange(null);
+        // 循环体内走到死路是每轮的常态：此时清空高亮会让 UI 在
+        // 「循环节点 ↔ 无」之间每轮翻转一次，白白触发重建。
+        // 运行结束（run 的 finally）会统一清空。
+        if (_activeLoops.isEmpty) _notifyNode(null);
         return;
       }
       final e = edges.first;
@@ -142,6 +186,24 @@ class BlueprintInterpreter {
 
   /// 执行单个节点动作，返回继续执行的输出端口 key
   Future<String> _execute(BlueprintScript script, BPNode n, String inPort) async {
+    final watch = Stopwatch()..start();
+    try {
+      return await _executeNode(script, n, inPort);
+    } finally {
+      // 媒体节点同步占用界面线程较久时提示一次，便于定位卡顿来源
+      if (watch.elapsedMilliseconds >= 300 &&
+          (n.type == 'screenshot' ||
+              n.type == 'ocr' ||
+              n.type == 'imageMatch')) {
+        _warnOnce(
+          'slow:${n.id}',
+          '慢节点：${n.title} 本次同步占用界面线程 ${watch.elapsedMilliseconds}ms',
+        );
+      }
+    }
+  }
+
+  Future<String> _executeNode(BlueprintScript script, BPNode n, String inPort) async {
     switch (n.type) {
       case 'start':
         return 'out';
@@ -281,6 +343,17 @@ class BlueprintInterpreter {
             _setFound(n, false);
             return 'out';
           }
+          // 模板比识别区域大时匹配器会直接判「未命中」：不打日志的话，
+          // 用户只会看到循环一直跑而不知道永远不可能命中。
+          if (tpl.width > img.width || tpl.height > img.height) {
+            _warnOnce(
+              'tplsize:${n.id}',
+              '图像识别：模板 ${tpl.width}×${tpl.height} 大于识别区域 '
+              '${img.width}×${img.height}，永远无法命中（请缩小模板或扩大区域）',
+            );
+            _setFound(n, false);
+            return 'out';
+          }
           final r = await recognition.matchTemplate(img, tpl, threshold: threshold);
           final (imgX, imgY) = _imageOrigin[img] ?? (0, 0);
           final fullX = imgX + r.x;
@@ -395,35 +468,81 @@ class BlueprintInterpreter {
 
   /// 循环节点：条件成立时自动重复执行「真」出口后的节点链，
   /// 直到条件不成立；不成立走「假」出口（由外层线性遍历继续，仅一次）。
-  /// 循环体无需连回本节点——「真」出口后的链走到死路即视为一轮结束。
+  /// 循环体无需连回本节点——「真」出口后的链走到死路即视为一轮结束；
+  /// 连回本节点也按「一轮结束」处理（兼容旧写法，不递归）。
   Future<String> _executeLoop(BlueprintScript script, BPNode n) async {
     final maxIterations = (n.params['maxIterations'] as num?)?.toInt() ?? 0;
     final op = (n.params['op'] as String?) ?? '==';
     var iterations = 0;
-    while (!_stopped) {
-      iterations++;
-      if (maxIterations > 0 && iterations > maxIterations) {
-        hooks.log('循环达到最大次数 $maxIterations，强制结束');
-        break;
+    // 数据边连续多轮读不到值时告警：首轮兜底常量是正常语义，
+    // 只有数据源一直不产出（连线断开/上游不在执行链上）时才提示。
+    final missing = <String, int>{};
+    _activeLoops.add(n.id);
+    try {
+      while (!_stopped) {
+        iterations++;
+        if (maxIterations > 0 && iterations > maxIterations) {
+          hooks.log('循环达到最大次数 $maxIterations，强制结束');
+          break;
+        }
+        _notifyNode(n.id);
+        final left = await _loopOperand(script, n, 'left', 'leftConst', missing);
+        final right = await _loopOperand(script, n, 'right', 'rightConst', missing);
+        final ok = compareValues(left, right, op);
+        hooks.log(
+            '循环: ${_brief(left)} ${_compareOpLabel(op)} ${_brief(right)} → ${ok ? '真' : '假'}');
+        if (!ok) break;
+        final edges = script.outEdges(n.id, 'true', kind: EdgeKind.exec);
+        if (edges.isEmpty) {
+          hooks.log('循环条件成立但「真」出口未连接，结束循环');
+          break;
+        }
+        final bodyStart = script.nodes[edges.first.to.nodeId];
+        if (bodyStart == null) break;
+        if (bodyStart.id == n.id) {
+          hooks.log('循环体指向自身，结束循环');
+          break;
+        }
+        // 一轮循环体 = 从真出口目标开始的一次线性链式执行（走到死路为止）
+        await _exec(script, bodyStart, edges.first.to.port);
+        // 每轮结束必须真实让出事件循环：即使本轮没有经过任何延时节点
+        // （例如延时只挂在「条件为真」分支），也要给帧回调与 F10 轮询
+        // （Timer）执行机会，否则循环会以满速空转把界面彻底冻住。
+        await _cooperate();
       }
-      hooks.onNodeChange(n.id);
-      final left = await _resolveInput(script, n, 'left', 'leftConst');
-      final right = await _resolveInput(script, n, 'right', 'rightConst');
-      final ok = compareValues(left, right, op);
-      hooks.log(
-          '循环: ${_brief(left)} ${_compareOpLabel(op)} ${_brief(right)} → ${ok ? '真' : '假'}');
-      if (!ok) break;
-      final edges = script.outEdges(n.id, 'true', kind: EdgeKind.exec);
-      if (edges.isEmpty) {
-        hooks.log('循环条件成立但「真」出口未连接，结束循环');
-        break;
-      }
-      final bodyStart = script.nodes[edges.first.to.nodeId];
-      if (bodyStart == null) break;
-      // 一轮循环体 = 从真出口目标开始的一次线性链式执行（走到死路为止）
-      await _exec(script, bodyStart, edges.first.to.port);
+    } finally {
+      _activeLoops.remove(n.id);
     }
     return 'false';
+  }
+
+  /// 循环条件取值：数据边优先；数据边存在但上游尚未产出值时给出一次性告警
+  /// （常见于循环体链路断开、条件数据源永远不执行），再回退常量参数。
+  Future<Object?> _loopOperand(
+    BlueprintScript script,
+    BPNode n,
+    String port,
+    String constKey,
+    Map<String, int> missing,
+  ) async {
+    final edges = script.inEdges(n.id, port, kind: EdgeKind.data);
+    if (edges.isNotEmpty) {
+      final v = await _readDataPort(script, edges.first.from);
+      if (v != null) {
+        missing[port] = 0;
+        return v;
+      }
+      final miss = (missing[port] ?? 0) + 1;
+      missing[port] = miss;
+      final src = script.nodes[edges.first.from.nodeId];
+      if (miss >= 3 && src != null) {
+        _warnOnce(
+          '${n.id}:$port',
+          '循环的「$port」数据源一直未产出（上游「${src.title}」未执行或连线断开），已回退常量参数',
+        );
+      }
+    }
+    return (n.params[constKey] as String?) ?? '';
   }
 
   // ---- 鼠标 / 键盘动作 ----
@@ -552,6 +671,21 @@ class BlueprintInterpreter {
     }
   }
 
+  /// 协作让出事件循环：所有循环/空转路径的统一出口。
+  /// 至少等待一个**真实**定时器（[kMinCoopDelayMs]）；距上次等待帧超过
+  /// [kFrameYieldIntervalMs] 时再等一帧，把快速空转压到约每帧一轮。
+  /// 用了零时长定时器或只在微任务里 `await` 都不会让帧回调与 F10 轮询有机会执行。
+  Future<void> _cooperate() async {
+    final yieldFrame = hooks.yieldToFrame;
+    if (yieldFrame != null &&
+        _frameWatch.elapsedMilliseconds >= kFrameYieldIntervalMs) {
+      _frameWatch.reset();
+      await yieldFrame();
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: kMinCoopDelayMs));
+  }
+
   /// 可中止的等待（每 50ms 检查一次停止标志）
   Future<void> _sleep(int ms) async {
     var left = ms;
@@ -563,6 +697,13 @@ class BlueprintInterpreter {
   }
 
   // ---- 参数/数据解析辅助 ----
+
+  /// 通知 UI 当前执行节点；同一节点连续执行不重复通知，避免频繁重建编辑器
+  void _notifyNode(String? id) {
+    if (id == _notifiedNodeId) return;
+    _notifiedNodeId = id;
+    hooks.onNodeChange(id);
+  }
 
   void _writeOut(BPNode n, String port, Object? value) =>
       _portValues[PortRef(nodeId: n.id, port: port)] = value;

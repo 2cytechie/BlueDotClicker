@@ -1,5 +1,5 @@
 import 'package:fl_nodes_v2/fl_nodes_v2.dart' as fl;
-import 'package:flutter/foundation.dart' show mapEquals;
+import 'package:flutter/foundation.dart' show ValueNotifier, mapEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,6 +33,9 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   bool _showLogs = false;
   /// 变量初始值面板有修改（graph 之外的脏状态，project.isDirty 覆盖不到）
   bool _varsDirty = false;
+  /// 运行中节点高亮：单独下钻到节点体，避免每次节点切换重建整页/整张画布
+  final ValueNotifier<String?> _runningNode = ValueNotifier<String?>(null);
+  late final fl.NodeWidgetBuilder _nodeBuilder;
   // dispose 中禁止使用 ref（Riverpod 3 抛 StateError）——didChangeDependencies 捕获
   CoordinatePickNotifier? _pickNotifier;
   KeyPickNotifier? _keyPickNotifier;
@@ -45,6 +48,13 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     _controller = fl.NodeEditorController(definitions: blueprintNodeRegistry);
     // 执行流输出口单出边约束（引擎只走首条执行流边，多条会被静默忽略）
     _controller.connectionValidator = blueprintConnectionValidator;
+    _nodeBuilder = nodeBodyBuilder(runningNode: _runningNode);
+    ref.listenManual(
+      runnerProvider.select((s) => s.currentNodeId),
+      (_, next) {
+        if (mounted) _runningNode.value = next;
+      },
+    );
     // Ctrl+S 保存：编辑界面挂载期间监听（不依赖具体控件的焦点）
     HardwareKeyboard.instance.addHandler(_onKeyEvent);
     // 打开脚本 → 载入图（不同实例才载入，避免编辑引起的刷新重置画布）
@@ -100,6 +110,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     // 屏幕定位的分层窗口与鼠标钩子同样必须收起，否则离开编辑器后图标残留在屏幕上
     _locateNotifier?.stop();
     _controller.dispose();
+    _runningNode.dispose();
     super.dispose();
   }
 
@@ -289,21 +300,14 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   @override
   Widget build(BuildContext context) {
     final script = ref.watch(currentScriptProvider);
-    // select 拆分：日志每步追加，若整页 watch 会在运行中导致整页（含画布）每条日志重建
+    // select 拆分：日志每步追加，若整页 watch 会在运行中导致整页（含画布）每条日志重建。
+    // 运行中节点高亮经 _runningNode 下钻到节点体，本页不再 watch currentNodeId。
     final running = ref.watch(runnerProvider.select((s) => s.running));
-    final runningNodeId = ref.watch(
-      runnerProvider.select((s) => s.currentNodeId),
-    );
-    final currentNodeTitle = () {
-      if (runningNodeId == null || _loadedScript == null) return '…';
-      final n = _controller.graph.nodes[runningNodeId];
-      return n == null ? '…' : nodeDef(n.type).title;
-    }();
 
     return Scaffold(
       body: Column(
         children: [
-          _buildToolbar(script, running, currentNodeTitle),
+          _buildToolbar(script, running),
           const Divider(height: 1),
           Expanded(
             child: _loadedScript == null
@@ -313,9 +317,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
                       final editor = fl.NodeEditor(
                         key: _editorKey,
                         controller: _controller,
-                        nodeBuilder: nodeBodyBuilder(
-                          runningNodeId: runningNodeId,
-                        ),
+                        nodeBuilder: _nodeBuilder,
                         theme: fl.NodeEditorTheme.dark(
                           accent: AppColors.peacock,
                         ).copyWith(background: AppColors.canvasBg),
@@ -390,11 +392,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
 
   // ---- 顶部工具栏 ----
 
-  Widget _buildToolbar(
-    BlueprintScript? script,
-    bool running,
-    String currentNodeTitle,
-  ) {
+  Widget _buildToolbar(BlueprintScript? script, bool running) {
     return Container(
       color: AppColors.moonWhite,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -455,38 +453,8 @@ class _EditorPageState extends ConsumerState<EditorPage> {
                   )
                 : const SizedBox.shrink(),
           ),
-          // 运行中显示当前节点指示
-          if (running)
-            Container(
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: AppColors.success.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: const BoxDecoration(
-                      color: AppColors.success,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    '运行中 · $currentNodeTitle',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w400,
-                      color: AppColors.success,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          // 运行中显示当前节点指示（独立订阅，节点切换不重建本页）
+          if (running) _RunningNodePill(controller: _controller),
           running
               ? FilledButton.icon(
                   style: FilledButton.styleFrom(
@@ -551,6 +519,50 @@ class _EditorPageState extends ConsumerState<EditorPage> {
             onPressed: () => ref.read(appNavProvider.notifier).go(AppTab.home),
             icon: const Icon(Icons.home_outlined, size: 18),
             label: const Text('返回首页'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 运行中节点指示：独立订阅 currentNodeId，节点切换只重建此胶囊
+class _RunningNodePill extends ConsumerWidget {
+  const _RunningNodePill({required this.controller});
+
+  final fl.NodeEditorController controller;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final nodeId = ref.watch(runnerProvider.select((s) => s.currentNodeId));
+    final node = nodeId == null ? null : controller.graph.nodes[nodeId];
+    final title = node == null ? '…' : nodeDef(node.type).title;
+    return Container(
+      margin: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppColors.success.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: const BoxDecoration(
+              color: AppColors.success,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '运行中 · $title',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w400,
+              color: AppColors.success,
+            ),
           ),
         ],
       ),

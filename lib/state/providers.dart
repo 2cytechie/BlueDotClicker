@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:fl_nodes_v2/fl_nodes_v2.dart' as fl;
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../engine/interpreter.dart';
@@ -14,11 +15,12 @@ import '../platform/key_picker.dart';
 import '../platform/platform_automation.dart';
 import '../platform/recording.dart';
 import '../platform/region_picker.dart';
+import '../platform/screen_marker.dart';
 import '../services/media_tester.dart';
 import '../services/recognition.dart';
 import '../services/script_storage.dart';
 import '../services/windows_recognition.dart';
-import '../platform/screen_marker.dart';
+import 'frame_yield.dart';
 
 // ---- 应用导航 ----
 
@@ -42,9 +44,11 @@ final automationProvider = Provider<PlatformAutomation>(
   (ref) => createAutomation(),
 );
 
-final recognitionProvider = Provider<RecognitionService>(
-  (ref) => WindowsRecognitionService(),
-);
+final recognitionProvider = Provider<RecognitionService>((ref) {
+  final service = WindowsRecognitionService(log: debugPrint);
+  ref.onDispose(service.dispose);
+  return service;
+});
 
 /// 媒体节点测试器（属性面板「测试」按钮使用）
 final mediaTesterProvider = Provider<MediaTester>(
@@ -675,8 +679,33 @@ class RunnerNotifier extends Notifier<RunnerState> {
   BlueprintInterpreter? _engine;
   Timer? _stopHotkey;
 
+  /// 引擎日志与节点高亮先入缓冲，再由 [_flush] 合并写入状态：
+  /// 每步直接写状态会让编辑器整页（含画布）逐节点重建，循环中放大卡顿。
+  /// 同一消息在本次窗口内只保留一行并计数：循环里「循环: … → 真」
+  /// 「图像识别: 未命中 …」每轮完全相同，逐条追加会刷爆日志面板。
+  final Map<String, _PendingLog> _pendingLogs = <String, _PendingLog>{};
+
+  /// 单个 flush 窗口内允许保留的不同消息上限，超出部分丢弃并计数
+  static const int _pendingLogLimit = 500;
+  int _droppedLogs = 0;
+
+  String? _pendingNodeId;
+  bool _nodeDirty = false;
+  Timer? _flushTimer;
+  bool _alive = true;
+
   @override
-  RunnerState build() => const RunnerState();
+  RunnerState build() {
+    _alive = true;
+    ref.onDispose(() {
+      _alive = false;
+      _flushTimer?.cancel();
+      _flushTimer = null;
+      _stopHotkey?.cancel();
+      _stopHotkey = null;
+    });
+    return const RunnerState();
+  }
 
   void start(BlueprintScript script) {
     if (state.running) return;
@@ -688,13 +717,20 @@ class RunnerNotifier extends Notifier<RunnerState> {
       );
       return;
     }
+    _pendingLogs.clear();
+    _droppedLogs = 0;
+    _nodeDirty = false;
+    _flushTimer?.cancel();
+    _flushTimer = null;
     final engine = BlueprintInterpreter(
       automation: automation,
       recognition: ref.read(recognitionProvider),
       hooks: EngineHooks(
-        log: (m) => _appendLog(m),
-        onNodeChange: (id) => state = state.copyWith(currentNodeId: id),
+        log: _appendLog,
+        onNodeChange: _setCurrentNode,
         loadRecording: (id) => ref.read(recordingStorageProvider).loadById(id),
+        // UI 层注入：快速空转的循环每帧让出一次，窗口最小化时由超时兜底
+        yieldToFrame: waitForNextFrame,
       ),
     );
     _engine = engine;
@@ -716,7 +752,13 @@ class RunnerNotifier extends Notifier<RunnerState> {
       engine.run(script).whenComplete(() {
         _stopHotkey?.cancel();
         _stopHotkey = null;
-        state = state.copyWith(running: false, currentNodeId: null);
+        if (!_alive) return;
+        _flush(); // 把最后一批日志与高亮落定后再切换运行状态
+        state = RunnerState(
+          running: false,
+          currentNodeId: null,
+          logs: state.logs,
+        );
         _engine = null;
       }),
     );
@@ -725,14 +767,78 @@ class RunnerNotifier extends Notifier<RunnerState> {
   void stop() {
     _engine?.stop();
     _appendLog('停止请求已发送');
+    _flush();
   }
 
-  void clearLogs() => state = state.copyWith(logs: []);
+  void clearLogs() {
+    _pendingLogs.clear();
+    _droppedLogs = 0;
+    _flushTimer?.cancel();
+    _flushTimer = null;
+    state = RunnerState(
+      running: state.running,
+      currentNodeId: state.currentNodeId,
+      logs: const [],
+    );
+  }
 
+  /// 引擎日志：先入缓冲（相同的消息合并计数），由 [_flush] 批量写入状态
   void _appendLog(String m) {
-    final now = TimeOfDayish.now();
-    state = state.copyWith(logs: [...state.logs.takeLast(499), '[$now] $m']);
+    final existing = _pendingLogs[m];
+    if (existing != null) {
+      existing.count++;
+    } else if (_pendingLogs.length < _pendingLogLimit) {
+      _pendingLogs[m] = _PendingLog(TimeOfDayish.now());
+    } else {
+      _droppedLogs++;
+    }
+    _scheduleFlush();
   }
+
+  /// 引擎节点高亮：值未变化时忽略（循环每轮都会回调同一节点）
+  void _setCurrentNode(String? id) {
+    if (!_alive || (!_nodeDirty && id == state.currentNodeId)) return;
+    _pendingNodeId = id;
+    _nodeDirty = true;
+    _scheduleFlush();
+  }
+
+  void _scheduleFlush() {
+    _flushTimer ??= Timer(const Duration(milliseconds: 60), _flush);
+  }
+
+  /// 把缓冲的日志与高亮合并为一次状态写入
+  void _flush() {
+    _flushTimer?.cancel();
+    _flushTimer = null;
+    if (!_alive || (!_nodeDirty && _pendingLogs.isEmpty)) return;
+    final logs = _pendingLogs.isEmpty ? state.logs : _mergeLogs();
+    final node = _nodeDirty ? _pendingNodeId : state.currentNodeId;
+    _nodeDirty = false;
+    state = RunnerState(running: state.running, currentNodeId: node, logs: logs);
+  }
+
+  /// 合并缓冲日志并保留最近 500 条；重复消息只出一行并标注次数
+  List<String> _mergeLogs() {
+    final lines = <String>[
+      for (final e in _pendingLogs.entries)
+        '[${e.value.stamp}] ${e.key}${e.value.count > 1 ? '（×${e.value.count}）' : ''}',
+    ];
+    if (_droppedLogs > 0) {
+      lines.add('…（日志过多，已省略 $_droppedLogs 条）');
+      _droppedLogs = 0;
+    }
+    _pendingLogs.clear();
+    if (lines.length >= 500) return lines.sublist(lines.length - 500);
+    return [...state.logs.takeLast(500 - lines.length), ...lines];
+  }
+}
+
+/// 缓冲中的一条日志：首次出现时间 + 本窗口内的重复次数
+class _PendingLog {
+  _PendingLog(this.stamp);
+  final String stamp;
+  int count = 1;
 }
 
 extension _TakeLast<T> on List<T> {
