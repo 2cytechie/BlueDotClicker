@@ -154,6 +154,10 @@ class HomePage extends ConsumerWidget {
               fallbackName: fallback,
             );
       await ref.read(scriptListProvider.notifier).refresh();
+      // 导入的 zip 会把内嵌录制写入本机录制目录；录制列表是全局缓存
+      // （启动时 IndexedStack 已构建录制页触发加载），不刷新会让蓝图
+      // 「执行录制」节点误判新导入的录制「已删除」
+      ref.invalidate(recordingsProvider);
       if (!context.mounted) return;
       ScaffoldMessenger.of(
         context,
