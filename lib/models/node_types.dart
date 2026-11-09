@@ -635,10 +635,10 @@ final List<NodeTypeDef> kNodeTypes = [
     category: NodeCategory.logic,
     icon: Icons.loop_rounded,
     description:
-        '条件循环：每次进入重新比较左右值，成立走「真（循环体）」，不成立走「假（结束循环）」；'
-        '循环体最后节点必须连回本节点输入。',
+        '条件循环：条件成立时自动重复执行「真」出口后的节点链，'
+        '每轮重新判断；条件不成立走「假（结束循环）」出口（执行一次）。',
     inputs: [
-      _inExec('in', '进入 / 循环返回'),
+      _inExec('in', '进入'),
       _inData('left', '左值'),
       _inData('right', '右值'),
     ],

@@ -16,7 +16,7 @@ Windows 自动化工具：基于蓝图工作流的连点器。
 | 文字识别 | `ocr` | 媒体 | `in` | `out` | `image` 输入图像(可空)、`targetText` 目标文本(可空) | `text` 文本、`found` 是否命中、`x` 坐标X、`y` 坐标Y |
 | 图像识别 | `imageMatch` | 媒体 | `in` | `out` | `image` 输入图像(可空) | `found` 是否命中、`x` 坐标X、`y` 坐标Y、`score` 相似度 |
 | 条件判断 | `condition` | 逻辑 | `in` | `true` 真、`false` 假 | `left` 左值、`right` 右值 | 无 |
-| 循环 | `loop` | 逻辑 | `in` 进入/循环返回 | `true` 真（循环体）、`false` 假（结束循环） | `left` 左值、`right` 右值 | 无 |
+| 循环 | `loop` | 逻辑 | `in` 进入 | `true` 真（循环体，自动重复）、`false` 假（结束循环） | `left` 左值、`right` 右值 | 无 |
 | 延时 | `delay` | 逻辑 | `in` | `out` | 无 | 无 |
 | 设置变量 | `setVar` | 数据 | `in` | `out` | `value` 值 | `valueOut` 值 |
 | 获取变量 | `getVar` | 数据 | 无（纯数据节点） | 无 | 无 | `value` 值 |

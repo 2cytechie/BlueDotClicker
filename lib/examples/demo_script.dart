@@ -4,10 +4,11 @@ import '../models/blueprint.dart';
 ///
 /// 开始 → 设置变量(count=0)
 ///      → 循环（count < 10）
-///           ├─ 真 → 加法(count + 1) → 设置变量(count) → 延时 → 循环.in
+///           ├─ 真 → 加法(count + 1) → 设置变量(count) → 延时
 ///           └─ 假 → 结束
 ///
-/// 演示条件循环、纯数据节点（获取变量）、加法与数据边连线，
+/// 演示条件循环（真出口后的节点链自动重复执行，无需连回循环）、
+/// 纯数据节点（获取变量）、加法与数据边连线，
 /// 不依赖图像识别与鼠标操作，安全可跑。
 BlueprintScript buildDemoScript() {
   final nodes = <String, BPNode>{
@@ -91,13 +92,6 @@ BlueprintScript buildDemoScript() {
       id: 'demo_e5',
       from: const PortRef(nodeId: 'demo_setvar2', port: 'out'),
       to: const PortRef(nodeId: 'demo_delay', port: 'in'),
-      kind: EdgeKind.exec,
-    ),
-    // 循环体末尾连回 in，形成闭环
-    'demo_e6': BPEdge(
-      id: 'demo_e6',
-      from: const PortRef(nodeId: 'demo_delay', port: 'out'),
-      to: const PortRef(nodeId: 'demo_loop', port: 'in'),
       kind: EdgeKind.exec,
     ),
     // 加法 A ← 获取变量(count)；结果 ← 加法.result

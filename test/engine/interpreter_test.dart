@@ -400,7 +400,6 @@ void main() {
       ], [
         _edge('e1', 'a', 'out', 'loop', 'in'),
         _edge('e2', 'loop', 'true', 'body', 'in'),
-        _edge('e3', 'body', 'out', 'loop', 'in'),
         _edge('e4', 'loop', 'false', 'done', 'in'),
       ]);
       final auto = MockAutomation();
@@ -435,7 +434,6 @@ void main() {
         _edge('e2', 'set1', 'out', 'loop', 'in'),
         _edge('e3', 'loop', 'true', 'add', 'in'),
         _edge('e4', 'add', 'out', 'set2', 'in'),
-        _edge('e5', 'set2', 'out', 'loop', 'in'),
         _edge('e6', 'loop', 'false', 'done', 'in'),
         _edge('d1', 'get', 'value', 'add', 'a', kind: EdgeKind.data),
         _edge('d2', 'add', 'result', 'set2', 'value', kind: EdgeKind.data),
@@ -445,6 +443,66 @@ void main() {
       final vars = await _run(s, auto: auto);
       expect(vars['count'], 3, reason: '首轮用常量 0，之后读数据边，累计到 3');
       expect(auto.calls, contains('click(3,3,count:1,left)'), reason: '条件为假后走假出口');
+    });
+
+    test('循环自动重复执行真出口链（循环体无需连回 in）', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('set1', 'setVar', {'name': 'count', 'const': '0'}),
+        _node('loop', 'loop', {
+          'op': '<',
+          'leftConst': '0',
+          'rightConst': '3',
+          'maxIterations': 10,
+        }),
+        _node('get', 'getVar', {'name': 'count'}),
+        _node('add', 'add', {'a': 0, 'b': 1}),
+        _node('set2', 'setVar', {'name': 'count', 'const': ''}),
+        _node('done', 'setVar', {'name': 'done', 'const': '完成'}),
+      ], [
+        _edge('e1', 'a', 'out', 'set1', 'in'),
+        _edge('e2', 'set1', 'out', 'loop', 'in'),
+        _edge('e3', 'loop', 'true', 'add', 'in'),
+        _edge('e4', 'add', 'out', 'set2', 'in'),
+        // 循环体链尾为死路（set2 无出边），循环应自动重判条件继续下一轮
+        _edge('e6', 'loop', 'false', 'done', 'in'),
+        _edge('d1', 'get', 'value', 'add', 'a', kind: EdgeKind.data),
+        _edge('d2', 'add', 'result', 'set2', 'value', kind: EdgeKind.data),
+        _edge('d3', 'set2', 'valueOut', 'loop', 'left', kind: EdgeKind.data),
+      ]);
+      final hooks = Hooks();
+      final vars = await _run(s, hooks: hooks);
+      expect(vars['count'], 3, reason: '真出口链自动循环 3 轮');
+      expect(vars['done'], '完成', reason: '条件为假后走假出口执行一次');
+      final loopLogs =
+          hooks.logs.where((l) => l.startsWith('循环:')).toList();
+      expect(loopLogs.length, 4, reason: '3 轮为真 + 1 轮为假');
+      expect(loopLogs.last, contains('假'));
+    });
+
+    test('条件成立但真出口未连接：打日志并走假出口，不空转', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('loop', 'loop', {
+          'op': '==',
+          'leftConst': '1',
+          'rightConst': '1',
+          'maxIterations': 0,
+        }),
+        _mouse('done', 'click', {'x': 3, 'y': 3}),
+      ], [
+        _edge('e1', 'a', 'out', 'loop', 'in'),
+        _edge('e4', 'loop', 'false', 'done', 'in'),
+      ]);
+      final auto = MockAutomation();
+      final hooks = Hooks();
+      await _run(s, auto: auto, hooks: hooks);
+      expect(hooks.logs.join(), contains('「真」出口未连接'));
+      expect(
+        auto.calls.where((c) => c.startsWith('click')).length,
+        1,
+        reason: '假出口只执行一次，运行正常结束',
+      );
     });
 
     test('设置变量并在条件中使用', () async {
@@ -796,7 +854,6 @@ void main() {
       ], [
         _edge('e1', 'a', 'out', 'loop', 'in'),
         _edge('e2', 'loop', 'true', 'd', 'in'),
-        _edge('e3', 'd', 'out', 'loop', 'in'),
       ]);
       final hooks = Hooks();
       final automation = MockAutomation();

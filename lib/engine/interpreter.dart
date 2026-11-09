@@ -62,9 +62,6 @@ class BlueprintInterpreter {
   /// 数据保存节点落盘服务（overrideDir 静态注入便于测试）
   final SaveFileService _saver = SaveFileService();
 
-  /// 循环节点安全阀计数（每次经输入端口进入 +1，循环结束时清空）
-  final Map<String, int> _loopIterations = {};
-
   /// 本次运行已提示过警告的节点 id（变量缺失等，避免循环内刷屏）
   final Set<String> _warnedNodes = {};
 
@@ -82,7 +79,6 @@ class BlueprintInterpreter {
     vars = VariableTable(initialVars ?? script.variables);
     _lastImage = null;
     _portValues.clear();
-    _loopIterations.clear();
     _warnedNodes.clear();
     _pressedKeys.clear();
     try {
@@ -102,7 +98,6 @@ class BlueprintInterpreter {
         if (!forever && count > 1) hooks.log('—— 第 $round/$count 次 ——');
         // 每轮清空端口与截图缓存（变量表跨轮保留，可作累计器）
         _portValues.clear();
-        _loopIterations.clear();
         _lastImage = null;
         await _exec(script, start, 'enter');
       }
@@ -307,25 +302,7 @@ class BlueprintInterpreter {
         }
 
       case 'loop':
-        {
-          final maxIterations = (n.params['maxIterations'] as num?)?.toInt() ?? 0;
-          final iterations = (_loopIterations[n.id] ?? 0) + 1;
-          _loopIterations[n.id] = iterations;
-          if (maxIterations > 0 && iterations > maxIterations) {
-            _loopIterations.remove(n.id);
-            hooks.log('循环达到最大次数 $maxIterations，强制结束');
-            return 'false';
-          }
-          final left = await _resolveInput(script, n, 'left', 'leftConst');
-          final right = await _resolveInput(script, n, 'right', 'rightConst');
-          final op = (n.params['op'] as String?) ?? '==';
-          final ok = compareValues(left, right, op);
-          hooks.log(
-              '循环: ${_brief(left)} ${_compareOpLabel(op)} ${_brief(right)} → ${ok ? '真' : '假'}');
-          if (ok) return 'true';
-          _loopIterations.remove(n.id);
-          return 'false';
-        }
+        return await _executeLoop(script, n);
 
       case 'delay':
         {
@@ -414,6 +391,39 @@ class BlueprintInterpreter {
         hooks.log('✗ 节点类型已移除或未知：${n.type}（执行流已中断）');
         return '__halt__';
     }
+  }
+
+  /// 循环节点：条件成立时自动重复执行「真」出口后的节点链，
+  /// 直到条件不成立；不成立走「假」出口（由外层线性遍历继续，仅一次）。
+  /// 循环体无需连回本节点——「真」出口后的链走到死路即视为一轮结束。
+  Future<String> _executeLoop(BlueprintScript script, BPNode n) async {
+    final maxIterations = (n.params['maxIterations'] as num?)?.toInt() ?? 0;
+    final op = (n.params['op'] as String?) ?? '==';
+    var iterations = 0;
+    while (!_stopped) {
+      iterations++;
+      if (maxIterations > 0 && iterations > maxIterations) {
+        hooks.log('循环达到最大次数 $maxIterations，强制结束');
+        break;
+      }
+      hooks.onNodeChange(n.id);
+      final left = await _resolveInput(script, n, 'left', 'leftConst');
+      final right = await _resolveInput(script, n, 'right', 'rightConst');
+      final ok = compareValues(left, right, op);
+      hooks.log(
+          '循环: ${_brief(left)} ${_compareOpLabel(op)} ${_brief(right)} → ${ok ? '真' : '假'}');
+      if (!ok) break;
+      final edges = script.outEdges(n.id, 'true', kind: EdgeKind.exec);
+      if (edges.isEmpty) {
+        hooks.log('循环条件成立但「真」出口未连接，结束循环');
+        break;
+      }
+      final bodyStart = script.nodes[edges.first.to.nodeId];
+      if (bodyStart == null) break;
+      // 一轮循环体 = 从真出口目标开始的一次线性链式执行（走到死路为止）
+      await _exec(script, bodyStart, edges.first.to.port);
+    }
+    return 'false';
   }
 
   // ---- 鼠标 / 键盘动作 ----
