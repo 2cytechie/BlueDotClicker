@@ -16,7 +16,7 @@ namespace {
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
 #endif
 
-/// Window attributes for light-mode title bar styling (Windows 11+).
+/// Window attributes for dark title bar styling (Windows 11+).
 /// Redefined in case the developer's machine has a Windows SDK older than
 /// version 10.0.22000.0.
 #ifndef DWMWA_CAPTION_COLOR
@@ -25,20 +25,16 @@ namespace {
 #ifndef DWMWA_TEXT_COLOR
 #define DWMWA_TEXT_COLOR 36
 #endif
+#ifndef DWMWA_BORDER_COLOR
+#define DWMWA_BORDER_COLOR 34
+#endif
 
-// 标题栏配色：与应用象牙白背景 (#FFFBF0) 融为一体，文字使用主墨色 (#17323B)。
-constexpr const COLORREF kCaptionColor = RGB(0xFF, 0xFB, 0xF0);
-constexpr const COLORREF kTitleTextColor = RGB(0x17, 0x32, 0x3B);
+// 标题栏配色：与应用深海夜蓝主题 (#28314E) 一致，文字使用浅色 (#ECF0FA)。
+constexpr const COLORREF kCaptionColor = RGB(0x28, 0x31, 0x4E);
+constexpr const COLORREF kTitleTextColor = RGB(0xEC, 0xF0, 0xFA);
+constexpr const COLORREF kBorderColor = RGB(0x21, 0x29, 0x42);
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
-
-/// Registry key for app theme preference.
-///
-/// A value of 0 indicates apps should use dark mode. A non-zero or missing
-/// value indicates apps should use light mode.
-constexpr const wchar_t kGetPreferredBrightnessRegKey[] =
-  L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
-constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme";
 
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
@@ -287,23 +283,15 @@ void Win32Window::OnDestroy() {
 }
 
 void Win32Window::UpdateTheme(HWND const window) {
-  DWORD light_mode;
-  DWORD light_mode_size = sizeof(light_mode);
-  LSTATUS result = RegGetValue(HKEY_CURRENT_USER, kGetPreferredBrightnessRegKey,
-                               kGetPreferredBrightnessRegValue,
-                               RRF_RT_REG_DWORD, nullptr, &light_mode,
-                               &light_mode_size);
-
-  if (result == ERROR_SUCCESS) {
-    BOOL enable_dark_mode = light_mode == 0;
-    DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
-                          &enable_dark_mode, sizeof(enable_dark_mode));
-  }
-
-  // 将标题栏融入应用背景（在 Windows 10 及更早系统上这些属性不可用，
-  // DwmSetWindowAttribute 会静默失败，不影响运行）。
-  ::DwmSetWindowAttribute(window, DWMWA_CAPTION_COLOR, &kCaptionColor,
-                          sizeof(kCaptionColor));
-  ::DwmSetWindowAttribute(window, DWMWA_TEXT_COLOR, &kTitleTextColor,
-                          sizeof(kTitleTextColor));
+  // 应用固定使用深色主题：强制启用深色窗口装饰，确保标题栏按钮为浅色，
+  // 再叠加与应用背景一致的标题栏/文字/边框颜色。
+  BOOL enable_dark_mode = TRUE;
+  DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                        &enable_dark_mode, sizeof(enable_dark_mode));
+  DwmSetWindowAttribute(window, DWMWA_CAPTION_COLOR, &kCaptionColor,
+                        sizeof(kCaptionColor));
+  DwmSetWindowAttribute(window, DWMWA_TEXT_COLOR, &kTitleTextColor,
+                        sizeof(kTitleTextColor));
+  DwmSetWindowAttribute(window, DWMWA_BORDER_COLOR, &kBorderColor,
+                        sizeof(kBorderColor));
 }

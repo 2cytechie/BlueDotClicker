@@ -1,5 +1,5 @@
 name: bluedot_clicker
-description: "蓝点器（BlueDot Clicker）— Windows 自动化工具"
+description: "蓝点器— Windows 自动化工具"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -67,6 +67,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/branding/app_icon_512.png
 
   # 全局圆润字体 MiSans（小米 · 免费商用）：300/400/500/600 四个字重
   fonts:

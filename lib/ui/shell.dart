@@ -49,23 +49,22 @@ class _SideNav extends ConsumerWidget {
       child: Column(
         children: [
           const SizedBox(height: 20),
-          // 应用标识
+          // 应用标识：使用与软件图标一致的图形
           Container(
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [AppColors.peacockHover, AppColors.peacockDeep],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
               borderRadius: BorderRadius.circular(AppRadius.lg),
-              boxShadow: AppShadows.accentGlow,
+              boxShadow: AppShadows.card,
             ),
-            child: const Icon(
-              Icons.hub_rounded,
-              color: AppColors.onAccent,
-              size: 26,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              child: Image.asset(
+                'assets/branding/app_icon_512.png',
+                width: 44,
+                height: 44,
+                filterQuality: FilterQuality.high,
+              ),
             ),
           ),
           const SizedBox(height: AppSpacing.xs),
