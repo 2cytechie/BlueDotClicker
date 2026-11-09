@@ -106,44 +106,38 @@ class _NodeBodyContent extends StatelessWidget {
       width: double.infinity,
       decoration: BoxDecoration(
         color: AppColors.moonWhite,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(
           color: highlight
               ? AppColors.success
-              : (selected ? AppColors.peacock : AppColors.outline),
+              : (selected ? AppColors.peacock : AppColors.outlineSubtle),
           width: highlight || selected ? 2 : 1,
         ),
-        boxShadow: highlight
-            ? [
-                BoxShadow(
-                  color: AppColors.peacock.withValues(alpha: 0.35),
-                  blurRadius: 12,
-                ),
-              ]
-            : const [
-                BoxShadow(
-                  color: Color(0x14000000),
-                  blurRadius: 4,
-                  offset: Offset(0, 1),
-                ),
-              ],
+        boxShadow: highlight ? AppShadows.successGlow : AppShadows.card,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // 类别色顶栏
+          // 类别色顶栏（轻微渐变增加层次）
           Container(
             height: 32,
             padding: const EdgeInsets.symmetric(horizontal: 10),
             decoration: BoxDecoration(
-              color: categoryColor,
+              gradient: LinearGradient(
+                colors: [
+                  categoryColor,
+                  Color.lerp(categoryColor, AppColors.canvasBg, 0.22)!,
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
               borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(9),
+                top: Radius.circular(11),
               ),
             ),
             child: Row(
               children: [
-                Icon(def.icon, size: 15, color: Colors.white),
+                Icon(def.icon, size: 15, color: AppColors.onAccent),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -153,7 +147,7 @@ class _NodeBodyContent extends StatelessWidget {
                     style: const TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
-                      color: Colors.white,
+                      color: AppColors.onAccent,
                     ),
                   ),
                 ),
@@ -174,10 +168,7 @@ class _NodeBodyContent extends StatelessWidget {
                         line,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.inkSecondary,
-                        ),
+                        style: AppTextStyles.captionMuted,
                       ),
                     ),
                   // 执行录制节点：显示所选录制（跟随录制重命名/删除实时更新）
@@ -224,7 +215,9 @@ class _NodeBodyContent extends StatelessWidget {
               lines.add('dx=${v('dx')} dy=${v('dy')}');
             case 'move':
               final dur = _asInt(data['moveDurationMs']);
-              lines.add('→ (${v('x')}, ${v('y')})${dur > 0 ? ' ${dur}ms' : ''}');
+              lines.add(
+                '→ (${v('x')}, ${v('y')})${dur > 0 ? ' ${dur}ms' : ''}',
+              );
             case 'longPress':
               lines.add('(${v('x')}, ${v('y')}) ${_buttonName(v('button'))}');
               lines.add('保持 ${v('holdMs')}ms');
@@ -288,9 +281,7 @@ class _NodeBodyContent extends StatelessWidget {
         if (maxIt > 0) lines.add('最多 $maxIt 次');
       case 'add':
       case 'subtract':
-        lines.add(
-          '${v('a')} ${node.type == 'add' ? '+' : '−'} ${v('b')}',
-        );
+        lines.add('${v('a')} ${node.type == 'add' ? '+' : '−'} ${v('b')}');
       case 'delay':
         lines.add('等待 ${v('ms')}ms');
       case 'setVar':
@@ -345,7 +336,7 @@ class _RecordingSummary extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    const style = TextStyle(fontSize: 11, color: AppColors.inkSecondary);
+    const style = AppTextStyles.captionMuted;
     final async = ref.watch(recordingsProvider);
 
     Widget line(String label) => Text(

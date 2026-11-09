@@ -70,27 +70,23 @@ class NodePalette extends ConsumerWidget {
         padding: const EdgeInsets.only(bottom: 12),
         children: [
           const Padding(
-            padding: EdgeInsets.fromLTRB(16, 14, 16, 6),
-            child: Text(
-              '节点库',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: AppColors.inkSecondary,
-              ),
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.widgets_outlined,
+                  size: 15,
+                  color: AppColors.peacock,
+                ),
+                SizedBox(width: 6),
+                Text('节点库', style: AppTextStyles.eyebrow),
+              ],
             ),
           ),
           for (final category in NodeCategory.values) ...[
             ExpansionTile(
               leading: Icon(category.icon, color: category.color),
-              title: Text(
-                category.label,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w400,
-                  color: AppColors.ink,
-                ),
-              ),
+              title: Text(category.label, style: AppTextStyles.itemTitle),
               initiallyExpanded: category == NodeCategory.interaction,
               childrenPadding: const EdgeInsets.only(bottom: 4),
               children: [
@@ -103,22 +99,12 @@ class NodePalette extends ConsumerWidget {
                         color: def.category.color,
                         size: 22,
                       ),
-                      title: Text(
-                        def.title,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w400,
-                          color: AppColors.ink,
-                        ),
-                      ),
+                      title: Text(def.title, style: AppTextStyles.body),
                       subtitle: Text(
                         def.description,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.inkSecondary,
-                        ),
+                        style: AppTextStyles.captionMuted,
                       ),
                       onTap: () => _addType(ref, context, def),
                     ),
@@ -131,14 +117,7 @@ class NodePalette extends ConsumerWidget {
                   Icons.data_object_rounded,
                   color: AppColors.nodeData,
                 ),
-                title: const Text(
-                  '变量',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w400,
-                    color: AppColors.ink,
-                  ),
-                ),
+                title: const Text('变量', style: AppTextStyles.itemTitle),
                 childrenPadding: const EdgeInsets.only(bottom: 4),
                 children: [
                   _VariablesSection(
@@ -219,9 +198,10 @@ class _VariablesSection extends ConsumerWidget {
     return ListenableBuilder(
       listenable: controller,
       builder: (context, _) {
-        final names = {...initialized.keys, ...graphVarNames(controller.graph)}
-            .toList()
-          ..sort();
+        final names = {
+          ...initialized.keys,
+          ...graphVarNames(controller.graph),
+        }.toList()..sort();
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -229,7 +209,7 @@ class _VariablesSection extends ConsumerWidget {
               padding: EdgeInsets.fromLTRB(16, 6, 16, 4),
               child: Text(
                 '点击变量名在画布创建「获取变量」节点；右侧输入框为初始值',
-                style: TextStyle(fontSize: 11, color: AppColors.inkSecondary),
+                style: AppTextStyles.captionMuted,
               ),
             ),
             if (names.isEmpty)
@@ -237,7 +217,7 @@ class _VariablesSection extends ConsumerWidget {
                 padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
                 child: Text(
                   '暂无变量：用「设置变量」节点、或在此新建',
-                  style: TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+                  style: AppTextStyles.captionMuted,
                 ),
               )
             else
@@ -258,10 +238,7 @@ class _VariablesSection extends ConsumerWidget {
                 size: 20,
                 color: AppColors.nodeData,
               ),
-              title: const Text(
-                '新建变量',
-                style: TextStyle(fontSize: 13, color: AppColors.ink),
-              ),
+              title: const Text('新建变量', style: AppTextStyles.body),
               onTap: () => _newVariable(context, ref),
             ),
           ],
@@ -299,7 +276,9 @@ class _VariableRowState extends ConsumerState<_VariableRow> {
   @override
   void initState() {
     super.initState();
-    _initCtl = TextEditingController(text: widget.initialValue?.toString() ?? '');
+    _initCtl = TextEditingController(
+      text: widget.initialValue?.toString() ?? '',
+    );
     _initFocus = FocusNode()..addListener(_commitOnUnfocus);
   }
 
@@ -326,9 +305,7 @@ class _VariableRowState extends ConsumerState<_VariableRow> {
     if (graphVarNames(widget.controller.graph).contains(widget.name) &&
         context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('图中仍有节点引用 ${widget.name}，变量仍会显示在列表中'),
-        ),
+        SnackBar(content: Text('图中仍有节点引用 ${widget.name}，变量仍会显示在列表中')),
       );
     }
   }
@@ -363,7 +340,7 @@ class _VariableRowState extends ConsumerState<_VariableRow> {
         widget.name,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 13, color: AppColors.ink),
+        style: AppTextStyles.body,
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -377,7 +354,10 @@ class _VariableRowState extends ConsumerState<_VariableRow> {
               decoration: const InputDecoration(
                 hintText: '初始值',
                 isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 8,
+                ),
               ),
               onSubmitted: (_) => _initFocus.unfocus(),
             ),

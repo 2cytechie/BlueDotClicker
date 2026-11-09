@@ -140,10 +140,10 @@ class PropertyPanel extends ConsumerWidget {
       .any((c) => c.to.nodeId == node.id && c.to.portId == port);
 
   /// varName 字段的已有变量候选（变量面板已初始化的 + 图中 varName 参数引用的），排序
-  List<String> _varNameSuggestions(WidgetRef ref) =>
-      ({...ref.watch(scriptVariablesProvider).keys, ...graphVarNames(controller.graph)})
-          .toList()
-        ..sort();
+  List<String> _varNameSuggestions(WidgetRef ref) => ({
+    ...ref.watch(scriptVariablesProvider).keys,
+    ...graphVarNames(controller.graph),
+  }).toList()..sort();
 
   /// 参数列表：先按节点当前取值过滤掉不适用的字段（如非拖拽动作不显示起终点），
   /// 再让参数对左右并排（各占一半宽）。坐标对上方渲染「拾取坐标 + 屏幕定位」
@@ -242,48 +242,23 @@ class PropertyPanel extends ConsumerWidget {
       padding: const EdgeInsets.only(top: 2, bottom: 14),
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppColors.ivory,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppColors.outline),
-        ),
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: AppDecor.sunken,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              '端口说明',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w400,
-                color: AppColors.ink,
-              ),
-            ),
+            const Text('端口说明', style: AppTextStyles.sectionTitle),
             for (final (title, ports) in [('输入', inputs), ('输出', outputs)])
               if (ports.isNotEmpty) ...[
                 Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w400,
-                      color: AppColors.inkSecondary,
-                    ),
-                  ),
+                  padding: const EdgeInsets.only(top: AppSpacing.sm),
+                  child: Text(title, style: AppTextStyles.caption),
                 ),
                 for (final p in ports) ...[
                   _PortDocHeader(port: p),
                   const SizedBox(height: 4),
-                  Text(
-                    p.note!,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      height: 1.5,
-                      color: AppColors.inkSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
+                  Text(p.note!, style: AppTextStyles.caption),
+                  const SizedBox(height: AppSpacing.sm),
                 ],
               ],
           ],
@@ -396,117 +371,111 @@ class PropertyPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (context, _) {
-        final selectedIds = controller.selection.nodeIds;
-        final node = selectedIds.isEmpty
-            ? null
-            : controller.graph.nodes[selectedIds.first];
+    return Material(
+      color: AppColors.moonWhite,
+      child: ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) {
+          final selectedIds = controller.selection.nodeIds;
+          final node = selectedIds.isEmpty
+              ? null
+              : controller.graph.nodes[selectedIds.first];
 
-        if (node == null) {
-          return const Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.tune_rounded, size: 44, color: AppColors.outline),
-                SizedBox(height: 12),
-                Text(
-                  '选中节点以编辑属性',
-                  style: TextStyle(fontSize: 13, color: AppColors.inkSecondary),
-                ),
-              ],
-            ),
-          );
-        }
-
-        // 注释是 fl_nodes 的画布节点（类型 __comment__），不参与执行，
-        // 也不是"已移除类型"——单独给只读说明，避免误报为未知节点。
-        if (fl.NodeComment.isComment(node)) {
-          return _buildCommentNotice(context, node);
-        }
-
-        final def = nodeDef(node.type);
-        final color = def.category.color;
-        final known = isKnownNodeType(node.type);
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // 头部：类别色图标 + 标题 + 类型名 + 删除
-            Container(
-              color: AppColors.moonWhite,
-              padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
-              child: Row(
+          if (node == null) {
+            return const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.15),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(def.icon, color: color, size: 20),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          def.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w500,
-                            color: AppColors.ink,
-                          ),
-                        ),
-                        Text(
-                          known ? def.type : '原类型：${node.type}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.inkSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '删除节点',
-                    color: AppColors.danger,
-                    onPressed: () => _confirmDelete(context, node),
-                    icon: const Icon(Icons.delete_outline_rounded),
-                  ),
+                  Icon(Icons.tune_rounded, size: 44, color: AppColors.outline),
+                  SizedBox(height: 12),
+                  Text('选中节点以编辑属性', style: AppTextStyles.caption),
                 ],
               ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
-                children: known
-                    ? [
-                        _buildTestSection(node),
-                        ..._buildParamFields(ref, node),
-                        _buildPortDocSection(node),
-                        const SizedBox(height: 12),
-                        Text(
-                          def.description,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            height: 1.5,
-                            color: AppColors.inkSecondary,
-                          ),
+            );
+          }
+
+          // 注释是 fl_nodes 的画布节点（类型 __comment__），不参与执行，
+          // 也不是"已移除类型"——单独给只读说明，避免误报为未知节点。
+          if (fl.NodeComment.isComment(node)) {
+            return _buildCommentNotice(context, node);
+          }
+
+          final def = nodeDef(node.type);
+          final color = def.category.color;
+          final known = isKnownNodeType(node.type);
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // 头部：类别色图标 + 标题 + 类型名 + 删除
+              Container(
+                color: AppColors.moonWhite,
+                padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                        border: Border.all(
+                          color: color.withValues(alpha: 0.35),
                         ),
-                      ]
-                    : [_buildUnknownNotice(context, node)],
+                      ),
+                      child: Icon(def.icon, color: color, size: 20),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            def.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTextStyles.sectionTitle,
+                          ),
+                          Text(
+                            known ? def.type : '原类型：${node.type}',
+                            style: AppTextStyles.captionMuted,
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '删除节点',
+                      color: AppColors.danger,
+                      onPressed: () => _confirmDelete(context, node),
+                      icon: const Icon(Icons.delete_outline_rounded),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        );
-      },
+              const Divider(height: 1),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
+                  children: known
+                      ? [
+                          _buildTestSection(node),
+                          ..._buildParamFields(ref, node),
+                          _buildPortDocSection(node),
+                          const SizedBox(height: 12),
+                          Text(
+                            def.description,
+                            style: AppTextStyles.body.copyWith(
+                              color: AppColors.inkSecondary,
+                            ),
+                          ),
+                        ]
+                      : [_buildUnknownNotice(context, node)],
+                ),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -519,8 +488,8 @@ class PropertyPanel extends ConsumerWidget {
           width: double.infinity,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: AppColors.danger.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(10),
+            color: AppColors.dangerSoft,
+            borderRadius: BorderRadius.circular(AppRadius.md),
             border: Border.all(color: AppColors.danger.withValues(alpha: 0.5)),
           ),
           child: Column(
@@ -530,7 +499,7 @@ class PropertyPanel extends ConsumerWidget {
                 '该节点类型已移除',
                 style: TextStyle(
                   fontSize: 13,
-                  fontWeight: FontWeight.w400,
+                  fontWeight: FontWeight.w500,
                   color: AppColors.danger,
                 ),
               ),
@@ -538,11 +507,7 @@ class PropertyPanel extends ConsumerWidget {
               Text(
                 '原类型「${node.type}」不再支持，无法编辑或执行。'
                 '与其相连的连线在打开脚本时已被移除，请删除该节点后重建对应操作。',
-                style: const TextStyle(
-                  fontSize: 12,
-                  height: 1.5,
-                  color: AppColors.inkSecondary,
-                ),
+                style: AppTextStyles.caption,
               ),
             ],
           ),
@@ -577,14 +542,7 @@ class PropertyPanel extends ConsumerWidget {
               ),
               const SizedBox(width: 8),
               const Expanded(
-                child: Text(
-                  '注释',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.ink,
-                  ),
-                ),
+                child: Text('注释', style: AppTextStyles.sectionTitle),
               ),
               IconButton(
                 tooltip: '删除注释',
@@ -720,16 +678,17 @@ class _CoordActionButton extends StatelessWidget {
       child: OutlinedButton.icon(
         onPressed: onPressed,
         style: OutlinedButton.styleFrom(
-          backgroundColor: active ? activeColor : AppColors.ivory,
-          foregroundColor: active ? Colors.white : AppColors.inkSecondary,
-          side: BorderSide(color: active ? activeColor : AppColors.outline),
-          // 覆盖主题里为整行按钮预留的横向 106 内边距，保证半宽不溢出
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+          backgroundColor: active ? activeColor : AppColors.canvasBg,
+          foregroundColor: active ? AppColors.onAccent : AppColors.inkSecondary,
+          side: BorderSide(
+            color: active ? activeColor : AppColors.outlineSubtle,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
           minimumSize: const Size(0, 34),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w400),
+          textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(AppRadius.md),
           ),
         ),
         icon: Icon(icon, size: 16),
@@ -976,34 +935,34 @@ class _ParamTextFieldState extends State<_ParamTextField> {
                 )
               // varName 字段：尾部下拉箭头快速选择已有变量（也支持手动输入新变量名）
               : suggestions != null && suggestions.isNotEmpty
-                  ? PopupMenuButton<String>(
-                      icon: const Icon(
-                        Icons.arrow_drop_down_rounded,
-                        size: 22,
-                        color: AppColors.inkSecondary,
-                      ),
-                      tooltip: '选择已有变量',
-                      position: PopupMenuPosition.under,
-                      onSelected: (v) {
-                        _lastApplied = v;
-                        _controller.text = v;
-                        widget.onCommit(v);
-                      },
-                      itemBuilder: (_) => [
-                        for (final s in suggestions)
-                          PopupMenuItem(
-                            value: s,
-                            child: Text(
-                              s,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: AppColors.ink,
-                              ),
-                            ),
+              ? PopupMenuButton<String>(
+                  icon: const Icon(
+                    Icons.arrow_drop_down_rounded,
+                    size: 22,
+                    color: AppColors.inkSecondary,
+                  ),
+                  tooltip: '选择已有变量',
+                  position: PopupMenuPosition.under,
+                  onSelected: (v) {
+                    _lastApplied = v;
+                    _controller.text = v;
+                    widget.onCommit(v);
+                  },
+                  itemBuilder: (_) => [
+                    for (final s in suggestions)
+                      PopupMenuItem(
+                        value: s,
+                        child: Text(
+                          s,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppColors.ink,
                           ),
-                      ],
-                    )
-                  : null,
+                        ),
+                      ),
+                  ],
+                )
+              : null,
           // suffixIcon 默认约束为 48×48，会把锁定态输入框撑得更高；
           // 收到小于文本行高即可，保证锁定前后输入框等高
           suffixIconConstraints: const BoxConstraints(
@@ -1389,15 +1348,15 @@ class _PortDocHeader extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.12),
+            color: color.withValues(alpha: 0.14),
             borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: color),
+            border: Border.all(color: color.withValues(alpha: 0.55)),
           ),
           child: Text(
             badge,
             style: TextStyle(
               fontSize: 11,
-              fontWeight: FontWeight.w400,
+              fontWeight: FontWeight.w500,
               color: color,
             ),
           ),
@@ -1410,11 +1369,7 @@ class _PortDocHeader extends StatelessWidget {
                 : port.label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w400,
-              color: AppColors.ink,
-            ),
+            style: AppTextStyles.body,
           ),
         ),
       ],

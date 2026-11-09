@@ -18,35 +18,32 @@ class PageHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 18),
+      padding: const EdgeInsets.only(bottom: AppSpacing.xl),
       child: Row(
         children: [
+          Container(
+            width: 3,
+            height: 38,
+            decoration: BoxDecoration(
+              color: AppColors.peacock,
+              borderRadius: BorderRadius.circular(2),
+              boxShadow: AppShadows.accentGlow,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.ink,
-                  ),
-                ),
+                Text(title, style: AppTextStyles.pageTitle),
                 if (subtitle != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle!,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: AppColors.inkSecondary,
-                    ),
-                  ),
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(subtitle!, style: AppTextStyles.caption),
                 ],
               ],
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: AppSpacing.md),
           ...trailing,
         ],
       ),
@@ -72,11 +69,8 @@ class SectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.moonWhite,
-        borderRadius: BorderRadius.circular(12),
-      ),
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: AppDecor.panel,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -84,23 +78,22 @@ class SectionCard extends StatelessWidget {
           Row(
             children: [
               if (icon != null) ...[
-                Icon(icon, size: 18, color: Colors.white),
-                const SizedBox(width: 6),
-              ],
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w400,
-                    color: AppColors.ink,
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: AppColors.peacock.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
                   ),
+                  child: Icon(icon, size: 16, color: AppColors.peacock),
                 ),
-              ),
+                const SizedBox(width: AppSpacing.sm),
+              ],
+              Expanded(child: Text(title, style: AppTextStyles.sectionTitle)),
               ?trailing,
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
           child,
         ],
       ),
@@ -120,17 +113,28 @@ class StatusBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color),
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        border: Border.all(color: color.withValues(alpha: 0.55)),
       ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w400,
-          color: color,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: color,
+            ),
+          ),
+        ],
       ),
     );
   }

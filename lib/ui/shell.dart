@@ -54,22 +54,27 @@ class _SideNav extends ConsumerWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: AppColors.peacock,
-              borderRadius: BorderRadius.circular(12),
+              gradient: const LinearGradient(
+                colors: [AppColors.peacockHover, AppColors.peacockDeep],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              boxShadow: AppShadows.accentGlow,
             ),
-            child: const Icon(Icons.hub_rounded, color: Colors.white, size: 26),
+            child: const Icon(
+              Icons.hub_rounded,
+              color: AppColors.onAccent,
+              size: 26,
+            ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpacing.xs),
           const Text(
             '蓝点器',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w400,
-              color: AppColors.inkSecondary,
-            ),
+            style: AppTextStyles.captionMuted,
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: AppSpacing.xxl),
           const _NavItem(
             icon: Icons.home_rounded,
             label: '首页',
@@ -105,9 +110,11 @@ class _NavItem extends ConsumerWidget {
       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 10),
       child: Material(
         color: selected ? AppColors.peacock : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        elevation: selected ? 2 : 0,
+        shadowColor: AppColors.shadow,
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadius.lg),
           onTap: () => ref.read(appNavProvider.notifier).go(tab),
           child: Container(
             width: 68,
@@ -117,15 +124,17 @@ class _NavItem extends ConsumerWidget {
                 Icon(
                   icon,
                   size: 24,
-                  color: selected ? Colors.white : AppColors.inkSecondary,
+                  color: selected ? AppColors.onAccent : AppColors.inkSecondary,
                 ),
                 const SizedBox(height: 3),
                 Text(
                   label,
                   style: TextStyle(
                     fontSize: 11,
-                    fontWeight: selected ? FontWeight.w500 : FontWeight.w300,
-                    color: selected ? Colors.white : AppColors.inkSecondary,
+                    fontWeight: selected ? FontWeight.w500 : FontWeight.w400,
+                    color: selected
+                        ? AppColors.onAccent
+                        : AppColors.inkSecondary,
                   ),
                 ),
               ],

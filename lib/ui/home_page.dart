@@ -7,12 +7,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/theme.dart';
 import '../models/blueprint.dart';
-import '../models/node_types.dart';
 import '../services/script_package.dart';
 import '../state/providers.dart';
 import 'common.dart';
 
-/// 首页：功能入口 + 脚本管理
+/// 首页：脚本管理
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
@@ -21,7 +20,7 @@ class HomePage extends ConsumerWidget {
     final automation = ref.watch(automationProvider);
     return Scaffold(
       body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
+        padding: AppSpacing.pagePadding,
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1080),
@@ -35,58 +34,11 @@ class HomePage extends ConsumerWidget {
                   const _UnsupportedBanner(),
                   const SizedBox(height: 16),
                 ],
-                // 功能入口卡片：宽窗口等宽铺满，窄窗口自动换行
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final wide = constraints.maxWidth >= 760;
-                    final cards = const [
-                      _EntryCard(
-                        title: '蓝图编辑器',
-                        desc: '拖拽节点搭建自动化工作流',
-                        icon: Icons.account_tree_outlined,
-                        color: NodeCategory.logic,
-                        route: '/editor',
-                      ),
-                      _EntryCard(
-                        title: '录制回放',
-                        desc: '录制键鼠操作，回放或供蓝图「执行录制」节点调用',
-                        icon: Icons.fiber_manual_record_rounded,
-                        color: NodeCategory.media,
-                        route: '/recordings',
-                      ),
-                    ];
-                    if (wide) {
-                      return Row(
-                        children: [
-                          for (final (i, card) in cards.indexed) ...[
-                            if (i > 0) const SizedBox(width: 14),
-                            Expanded(child: card),
-                          ],
-                        ],
-                      );
-                    }
-                    return Wrap(
-                      spacing: 14,
-                      runSpacing: 14,
-                      children: cards
-                          .map((c) => SizedBox(width: 260, child: c))
-                          .toList(),
-                    );
-                  },
-                ),
-                const SizedBox(height: 28),
                 // 我的脚本
                 Row(
                   children: [
                     const Expanded(
-                      child: Text(
-                        '我的脚本',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w500,
-                          color: AppColors.ink,
-                        ),
-                      ),
+                      child: Text('我的脚本', style: AppTextStyles.subTitle),
                     ),
                     OutlinedButton.icon(
                       onPressed: () => _importScript(context, ref),
@@ -143,7 +95,10 @@ class HomePage extends ConsumerWidget {
     try {
       final bytes = await f.readAsBytes();
       final fallback = f.name.replaceAll(
-        RegExp(r'\.bpc\.zip$|\.zip$|\.bpc\.json$|\.json$', caseSensitive: false),
+        RegExp(
+          r'\.bpc\.zip$|\.zip$|\.bpc\.json$|\.json$',
+          caseSensitive: false,
+        ),
         '',
       );
       final pkg = ScriptPackage();
@@ -249,8 +204,8 @@ class _UnsupportedBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: AppColors.moonWhite,
-        borderRadius: BorderRadius.circular(10),
+        color: AppColors.peacockSoft,
+        borderRadius: BorderRadius.circular(AppRadius.md),
         border: Border.all(color: AppColors.outline),
       ),
       child: Row(
@@ -258,95 +213,13 @@ class _UnsupportedBanner extends StatelessWidget {
           const Icon(
             Icons.info_outline_rounded,
             size: 18,
-            color: AppColors.inkSecondary,
+            color: AppColors.peacock,
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
-            child: Text(
-              '当前平台暂不支持自动化执行，可正常编辑脚本',
-              style: TextStyle(fontSize: 13, color: AppColors.inkSecondary),
-            ),
+            child: Text('当前平台暂不支持自动化执行，可正常编辑脚本', style: AppTextStyles.caption),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// 功能入口卡片
-class _EntryCard extends ConsumerWidget {
-  final String title;
-  final String desc;
-  final IconData icon;
-  final NodeCategory color;
-  final String route;
-
-  const _EntryCard({
-    required this.title,
-    required this.desc,
-    required this.icon,
-    required this.color,
-    required this.route,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Material(
-      color: AppColors.moonWhite,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: () => ref.read(appNavProvider.notifier).go(switch (route) {
-          '/editor' => AppTab.editor,
-          '/recordings' => AppTab.recordings,
-          _ => AppTab.home,
-        }),
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Row(
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: color.color.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: color.color, size: 24),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                        color: AppColors.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      desc,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppColors.inkSecondary,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: AppColors.inkSecondary,
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -383,22 +256,19 @@ class _ScriptList extends ConsumerWidget {
         if (scripts.isEmpty) {
           return Container(
             padding: const EdgeInsets.all(32),
-            decoration: BoxDecoration(
-              color: AppColors.moonWhite,
-              borderRadius: BorderRadius.circular(12),
-            ),
+            decoration: AppDecor.panel,
             child: Column(
               children: [
-                Icon(
+                const Icon(
                   Icons.note_add_rounded,
                   size: 40,
-                  color: AppColors.inkSecondary,
+                  color: AppColors.inkMuted,
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: AppSpacing.md),
                 Text(
                   '还没有脚本，点击右上角「新建」创建第一个蓝图，或导入 .bpc.zip / .bpc.json 文件',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: AppColors.inkSecondary, fontSize: 13),
+                  style: AppTextStyles.caption,
                 ),
               ],
             ),
@@ -447,21 +317,14 @@ class _ScriptRow extends ConsumerWidget {
                   children: [
                     Text(
                       s.name,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w400,
-                        color: AppColors.ink,
-                      ),
+                      style: AppTextStyles.itemTitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
                     Text(
                       '${_fmtTime(s.updatedAt)} · ${s.nodes.length} 个节点',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppColors.inkSecondary,
-                      ),
+                      style: AppTextStyles.caption,
                     ),
                   ],
                 ),

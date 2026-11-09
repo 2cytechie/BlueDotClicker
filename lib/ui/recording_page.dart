@@ -192,10 +192,7 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
               recording
                   ? '正在录制 · 已捕获 $_liveCount 个动作，请切换到目标窗口操作'
                   : '点击「开始录制」后，切换到目标窗口进行点击/拖拽/长按/滚轮/键盘操作',
-              style: const TextStyle(
-                fontSize: 13,
-                color: AppColors.inkSecondary,
-              ),
+              style: AppTextStyles.caption,
             ),
             const SizedBox(height: 14),
             recording
@@ -241,7 +238,7 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: Text(
                     '${i + 1}. [+${_previewRecording!.actions[i].offsetMs}ms] ${_actionLabel(_previewRecording!.actions[i])}',
-                    style: const TextStyle(fontSize: 13, color: AppColors.ink),
+                    style: AppTextStyles.body,
                   ),
                 ),
             ],
@@ -252,7 +249,7 @@ class _RecordingPageState extends ConsumerState<RecordingPage> {
 
     return Scaffold(
       body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+        padding: AppSpacing.pagePadding,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -369,7 +366,7 @@ class _HistoryPane extends ConsumerWidget {
             child: Center(
               child: Text(
                 '暂无历史录制，完成一次录制后会自动保存在这里',
-                style: TextStyle(fontSize: 13, color: AppColors.inkSecondary),
+                style: AppTextStyles.caption,
               ),
             ),
           );
@@ -407,31 +404,33 @@ class _HistoryPane extends ConsumerWidget {
       );
     }
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.moonWhite,
-        borderRadius: BorderRadius.circular(12),
-      ),
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: AppDecor.panel,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.history_rounded, size: 18, color: Colors.white),
-              const SizedBox(width: 6),
-              const Text(
-                '历史记录',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w400,
-                  color: AppColors.ink,
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: AppColors.peacock.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                ),
+                child: const Icon(
+                  Icons.history_rounded,
+                  size: 16,
+                  color: AppColors.peacock,
                 ),
               ),
+              const SizedBox(width: AppSpacing.sm),
+              const Text('历史记录', style: AppTextStyles.sectionTitle),
               const Spacer(),
               importBtn,
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
           Expanded(child: content),
         ],
       ),
@@ -569,21 +568,11 @@ class _HistoryTileState extends ConsumerState<_HistoryTile> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            r.name,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w400,
-                              color: AppColors.ink,
-                            ),
-                          ),
+                          Text(r.name, style: AppTextStyles.itemTitle),
                           const SizedBox(height: 2),
                           Text(
                             '${_fmtTime(r.createdAt)} · ${r.actions.length} 个动作',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: AppColors.inkSecondary,
-                            ),
+                            style: AppTextStyles.caption,
                           ),
                         ],
                       ),
@@ -636,11 +625,8 @@ class _HistoryTileState extends ConsumerState<_HistoryTile> {
           secondChild: Container(
             width: double.infinity,
             margin: const EdgeInsets.only(bottom: 8),
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppColors.ivory,
-              borderRadius: BorderRadius.circular(8),
-            ),
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: AppDecor.sunken,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -649,10 +635,7 @@ class _HistoryTileState extends ConsumerState<_HistoryTile> {
                     padding: const EdgeInsets.symmetric(vertical: 2),
                     child: Text(
                       '${i + 1}. [+${r.actions[i].offsetMs}ms] ${_label(r.actions[i])}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.inkSecondary,
-                      ),
+                      style: AppTextStyles.caption,
                     ),
                   ),
               ],

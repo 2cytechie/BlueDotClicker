@@ -601,7 +601,7 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
       },
       child: Scaffold(
         body: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+          padding: AppSpacing.pagePadding,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -650,17 +650,6 @@ class _RecordingEditorPageState extends ConsumerState<RecordingEditorPage> {
                     label: const Text('添加动作'),
                   ),
                   OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: const BorderSide(color: AppColors.peacock),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 18,
-                        vertical: 12,
-                      ),
-                    ),
                     onPressed: _replaying ? null : _replay,
                     icon: const Icon(Icons.play_arrow_rounded, size: 18),
                     label: const Text('试运行'),
@@ -789,8 +778,12 @@ class _ActionTile extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: AppColors.moonWhite,
-        borderRadius: BorderRadius.circular(12),
-        border: marking ? Border.all(color: AppColors.peacock, width: 2) : null,
+        borderRadius: BorderRadius.circular(AppRadius.xl),
+        border: Border.all(
+          color: marking ? AppColors.peacock : AppColors.outlineSubtle,
+          width: marking ? 2 : 1,
+        ),
+        boxShadow: AppShadows.card,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -813,9 +806,9 @@ class _ActionTile extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: color),
+                  color: color.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                  border: Border.all(color: color.withValues(alpha: 0.55)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -826,7 +819,7 @@ class _ActionTile extends StatelessWidget {
                       name,
                       style: TextStyle(
                         fontSize: 11,
-                        fontWeight: FontWeight.w400,
+                        fontWeight: FontWeight.w500,
                         color: color,
                       ),
                     ),
@@ -845,26 +838,20 @@ class _ActionTile extends StatelessWidget {
                         '${index + 1}.',
                         style: const TextStyle(
                           fontSize: 13,
-                          fontWeight: FontWeight.w400,
+                          fontWeight: FontWeight.w500,
                           color: AppColors.ink,
                         ),
                       ),
                       const SizedBox(width: 6),
                       Text(
                         '[+${action.offsetMs}ms]',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.inkSecondary,
-                        ),
+                        style: AppTextStyles.caption,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           describeAction(action),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: AppColors.ink,
-                          ),
+                          style: AppTextStyles.body,
                         ),
                       ),
                     ],
@@ -972,11 +959,8 @@ class _EditPanel extends StatelessWidget {
     ];
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.ivory,
-        borderRadius: BorderRadius.circular(8),
-      ),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: AppDecor.sunken,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -987,15 +971,15 @@ class _EditPanel extends StatelessWidget {
             children: fields,
           ),
           if (hasCoordinate) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: AppSpacing.sm),
             FilledButton.tonalIcon(
               style: FilledButton.styleFrom(
                 backgroundColor: marking
                     ? AppColors.peacock
-                    : AppColors.canvasBg,
-                foregroundColor: Colors.white,
+                    : AppColors.surfaceRaised,
+                foregroundColor: AppColors.onAccent,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 14,

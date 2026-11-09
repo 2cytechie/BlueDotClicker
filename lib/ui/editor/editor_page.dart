@@ -31,8 +31,10 @@ class _EditorPageState extends ConsumerState<EditorPage> {
   final GlobalKey<fl.NodeEditorState> _editorKey = GlobalKey();
   BlueprintScript? _loadedScript;
   bool _showLogs = false;
+
   /// 变量初始值面板有修改（graph 之外的脏状态，project.isDirty 覆盖不到）
   bool _varsDirty = false;
+
   /// 运行中节点高亮：单独下钻到节点体，避免每次节点切换重建整页/整张画布
   final ValueNotifier<String?> _runningNode = ValueNotifier<String?>(null);
   late final fl.NodeWidgetBuilder _nodeBuilder;
@@ -49,12 +51,9 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     // 执行流输出口单出边约束（引擎只走首条执行流边，多条会被静默忽略）
     _controller.connectionValidator = blueprintConnectionValidator;
     _nodeBuilder = nodeBodyBuilder(runningNode: _runningNode);
-    ref.listenManual(
-      runnerProvider.select((s) => s.currentNodeId),
-      (_, next) {
-        if (mounted) _runningNode.value = next;
-      },
-    );
+    ref.listenManual(runnerProvider.select((s) => s.currentNodeId), (_, next) {
+      if (mounted) _runningNode.value = next;
+    });
     // Ctrl+S 保存：编辑界面挂载期间监听（不依赖具体控件的焦点）
     HardwareKeyboard.instance.addHandler(_onKeyEvent);
     // 打开脚本 → 载入图（不同实例才载入，避免编辑引起的刷新重置画布）
@@ -318,14 +317,39 @@ class _EditorPageState extends ConsumerState<EditorPage> {
                         key: _editorKey,
                         controller: _controller,
                         nodeBuilder: _nodeBuilder,
-                        theme: fl.NodeEditorTheme.dark(
-                          accent: AppColors.peacock,
-                        ).copyWith(background: AppColors.canvasBg),
+                        theme:
+                            fl.NodeEditorTheme.dark(
+                              accent: AppColors.peacock,
+                            ).copyWith(
+                              background: AppColors.canvasBg,
+                              gridLine: AppColors.outlineSubtle.withValues(
+                                alpha: 0.35,
+                              ),
+                              gridLineMajor: AppColors.outline.withValues(
+                                alpha: 0.55,
+                              ),
+                              connectionColor: AppColors.outlineStrong,
+                              selectedConnectionColor: AppColors.peacockHover,
+                              hoveredConnectionColor: AppColors.inkSecondary,
+                              pendingConnectionColor: AppColors.peacockHover,
+                              invalidConnectionColor: AppColors.danger,
+                              portColor: AppColors.outlineStrong,
+                              portHoverColor: AppColors.peacockHover,
+                              portBorderColor: AppColors.canvasBg,
+                              selectionColor: AppColors.peacock,
+                              marqueeColor: AppColors.peacock,
+                              selectionRadius: const Radius.circular(
+                                AppRadius.lg,
+                              ),
+                              emphasisRadius: const Radius.circular(
+                                AppRadius.xl,
+                              ),
+                            ),
                         contextMenus: buildEditorContextMenus(),
                         onConnectionTap: _confirmDeleteConnection,
                         // 连线常态配色：执行流白色、数据绿色
-                        connectionAppearance:
-                            (c, from, to) => connectionAppearanceFor(from),
+                        connectionAppearance: (c, from, to) =>
+                            connectionAppearanceFor(from),
                       );
                       if (constraints.maxWidth >= 1100) {
                         return Row(
@@ -407,29 +431,32 @@ class _EditorPageState extends ConsumerState<EditorPage> {
               color: AppColors.inkSecondary,
             ),
           ),
-          const Icon(
-            Icons.account_tree_rounded,
-            color: AppColors.peacock,
-            size: 20,
+          Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: AppColors.peacock.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
+            child: const Icon(
+              Icons.account_tree_rounded,
+              color: AppColors.peacock,
+              size: 16,
+            ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               script?.name ?? '未打开脚本',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-                color: AppColors.ink,
-              ),
+              style: AppTextStyles.sectionTitle,
             ),
           ),
           // 未保存提示（跟随图/变量面板变化实时刷新）
           ListenableBuilder(
             listenable: _controller,
-            builder: (context, _) =>
-                _controller.project.isDirty || _varsDirty
+            builder: (context, _) => _controller.project.isDirty || _varsDirty
                 ? const Padding(
                     padding: EdgeInsets.only(right: 8),
                     child: Row(
@@ -492,38 +519,162 @@ class _EditorPageState extends ConsumerState<EditorPage> {
     );
   }
 
-  // ---- 未打开脚本时的引导 ----
+  // ---- 未打开脚本时：选择脚本 ----
 
   Widget _buildGuide() {
+    final scripts = ref.watch(scriptListProvider);
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.schema_outlined, size: 72, color: AppColors.outline),
-          const SizedBox(height: 16),
-          const Text(
-            '尚未打开脚本',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w400,
-              color: AppColors.inkSecondary,
-            ),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(32),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Icon(
+                Icons.schema_outlined,
+                size: 56,
+                color: AppColors.outline,
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                '选择一个脚本打开',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w400,
+                  color: AppColors.inkSecondary,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                '点击下方脚本即可载入蓝图编辑',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+              ),
+              const SizedBox(height: 20),
+              scripts.when(
+                loading: () => const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (e, _) => Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: AppDecor.panel,
+                  child: Column(
+                    children: [
+                      Text(
+                        '脚本列表加载失败：$e',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.danger,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: () =>
+                            ref.read(scriptListProvider.notifier).refresh(),
+                        icon: const Icon(Icons.refresh_rounded, size: 18),
+                        label: const Text('重试'),
+                      ),
+                    ],
+                  ),
+                ),
+                data: (list) => list.isEmpty
+                    ? Container(
+                        padding: const EdgeInsets.all(28),
+                        decoration: AppDecor.panel,
+                        child: Column(
+                          children: [
+                            const Icon(
+                              Icons.note_add_rounded,
+                              size: 36,
+                              color: AppColors.inkMuted,
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                            const Text(
+                              '还没有脚本，请先在首页新建一个蓝图脚本',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppColors.inkSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : Container(
+                        decoration: AppDecor.panel,
+                        clipBehavior: Clip.antiAlias,
+                        child: Material(
+                          color: Colors.transparent,
+                          child: Column(
+                            children: [
+                              for (final (i, s) in list.indexed) ...[
+                                if (i > 0) const Divider(height: 1),
+                                InkWell(
+                                  onTap: () => ref
+                                      .read(currentScriptProvider.notifier)
+                                      .open(s),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 12,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.hub_outlined,
+                                          size: 20,
+                                          color: AppColors.peacock,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                s.name,
+                                                style:
+                                                    AppTextStyles.itemTitle,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                '${_fmtUpdatedAt(s.updatedAt)} · ${s.nodes.length} 个节点',
+                                                style: AppTextStyles.caption,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        const Icon(
+                                          Icons.chevron_right_rounded,
+                                          color: AppColors.inkMuted,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-          const Text(
-            '从首页选择或新建一个蓝图脚本后开始编辑',
-            style: TextStyle(fontSize: 12, color: AppColors.inkSecondary),
-          ),
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            onPressed: () => ref.read(appNavProvider.notifier).go(AppTab.home),
-            icon: const Icon(Icons.home_outlined, size: 18),
-            label: const Text('返回首页'),
-          ),
-        ],
+        ),
       ),
     );
   }
+}
+
+String _fmtUpdatedAt(DateTime t) {
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${t.year}-${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
 }
 
 /// 运行中节点指示：独立订阅 currentNodeId，节点切换只重建此胶囊
@@ -541,8 +692,9 @@ class _RunningNodePill extends ConsumerWidget {
       margin: const EdgeInsets.only(right: 8),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: AppColors.success.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
+        color: AppColors.successSoft,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        border: Border.all(color: AppColors.success.withValues(alpha: 0.45)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -584,15 +736,10 @@ class _PickBanner extends ConsumerWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: AppColors.ink.withValues(alpha: 0.88),
-            borderRadius: BorderRadius.circular(999),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x33000000),
-                blurRadius: 8,
-                offset: Offset(0, 2),
-              ),
-            ],
+            color: AppColors.abyss.withValues(alpha: 0.94),
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            border: Border.all(color: AppColors.outlineSubtle),
+            boxShadow: AppShadows.floating,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -606,10 +753,7 @@ class _PickBanner extends ConsumerWidget {
               Text(
                 '${pick.target!.label} · 当前 (${cursor?.$1 ?? '-'}, ${cursor?.$2 ?? '-'})'
                 ' · 左/右/中键确认 · Esc 取消',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.moonWhite,
-                ),
+                style: const TextStyle(fontSize: 12, color: AppColors.ink),
               ),
               if (pick.target?.buttonKey != null)
                 const Text(
@@ -637,15 +781,10 @@ class _LocateBanner extends ConsumerWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: AppColors.ink.withValues(alpha: 0.88),
-            borderRadius: BorderRadius.circular(999),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x33000000),
-                blurRadius: 8,
-                offset: Offset(0, 2),
-              ),
-            ],
+            color: AppColors.abyss.withValues(alpha: 0.94),
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            border: Border.all(color: AppColors.outlineSubtle),
+            boxShadow: AppShadows.floating,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -659,10 +798,7 @@ class _LocateBanner extends ConsumerWidget {
               Text(
                 '${locate.target!.label} · 屏幕定位中 · 拖动屏幕上的图标改坐标'
                 ' · 再点「屏幕定位」关闭',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.moonWhite,
-                ),
+                style: const TextStyle(fontSize: 12, color: AppColors.ink),
               ),
             ],
           ),
@@ -686,15 +822,10 @@ class _KeyPickBanner extends ConsumerWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: AppColors.ink.withValues(alpha: 0.88),
-            borderRadius: BorderRadius.circular(999),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x33000000),
-                blurRadius: 8,
-                offset: Offset(0, 2),
-              ),
-            ],
+            color: AppColors.abyss.withValues(alpha: 0.94),
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            border: Border.all(color: AppColors.outlineSubtle),
+            boxShadow: AppShadows.floating,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -709,10 +840,7 @@ class _KeyPickBanner extends ConsumerWidget {
                 '${pick.target!.label} · '
                 '${pressed == null ? '请按下要绑定的按键' : '已捕获 ${keyLabel(pressed)}'}'
                 ' · Esc 取消',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.moonWhite,
-                ),
+                style: const TextStyle(fontSize: 12, color: AppColors.ink),
               ),
             ],
           ),
@@ -763,20 +891,25 @@ class _LogsPanelState extends ConsumerState<_LogsPanel> {
     );
     return Container(
       height: 220,
-      color: AppColors.canvasBg,
+      color: AppColors.abyss,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
             height: 36,
             padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: const BoxDecoration(color: AppColors.peacockDeep),
+            decoration: const BoxDecoration(
+              color: AppColors.surfaceRaised,
+              border: Border(
+                bottom: BorderSide(color: AppColors.outlineSubtle),
+              ),
+            ),
             child: Row(
               children: [
                 const Icon(
                   Icons.article_outlined,
                   size: 16,
-                  color: AppColors.ink,
+                  color: AppColors.peacock,
                 ),
                 const SizedBox(width: 6),
                 const Expanded(
@@ -784,7 +917,7 @@ class _LogsPanelState extends ConsumerState<_LogsPanel> {
                     '运行日志',
                     style: TextStyle(
                       fontSize: 12,
-                      fontWeight: FontWeight.w400,
+                      fontWeight: FontWeight.w500,
                       color: AppColors.ink,
                     ),
                   ),
@@ -795,12 +928,9 @@ class _LogsPanelState extends ConsumerState<_LogsPanel> {
                   icon: const Icon(
                     Icons.delete_outline_rounded,
                     size: 16,
-                    color: AppColors.ink,
+                    color: AppColors.inkSecondary,
                   ),
-                  label: const Text(
-                    '清空',
-                    style: TextStyle(fontSize: 12, color: AppColors.ink),
-                  ),
+                  label: const Text('清空', style: TextStyle(fontSize: 12)),
                 ),
               ],
             ),
