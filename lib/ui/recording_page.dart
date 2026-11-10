@@ -389,7 +389,7 @@ class _HistoryPane extends ConsumerWidget {
     );
 
     final importBtn = IconButton(
-      icon: const Icon(Icons.file_download_outlined, size: 18),
+      icon: const Icon(Icons.file_download_rounded, size: 18),
       color: AppColors.inkSecondary,
       tooltip: '导入录制 JSON',
       onPressed: () => _importRecording(context, ref),

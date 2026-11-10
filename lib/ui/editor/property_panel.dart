@@ -1339,9 +1339,15 @@ class _PortDocHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = port.kind == PortKind.exec
         ? AppColors.execWire
+        : port.dataType == kPortTypeImage
+        ? AppColors.imageWire
         : AppColors.dataWire;
     final badge =
-        '${port.kind == PortKind.exec ? '执行流' : '数据'}'
+        '${port.kind == PortKind.exec
+            ? '执行流'
+            : port.dataType == kPortTypeImage
+            ? '图像'
+            : '数据'}'
         '·${port.dir == PortDir.input ? '输入' : '输出'}';
     return Row(
       children: [

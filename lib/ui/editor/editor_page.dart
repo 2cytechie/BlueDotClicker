@@ -406,7 +406,7 @@ class _EditorPageState extends ConsumerState<EditorPage> {
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOutCubic,
             child: _showLogs
-                ? const _LogsPanel()
+                ? _LogsPanel(onClose: () => setState(() => _showLogs = false))
                 : const SizedBox(width: double.infinity),
           ),
         ],
@@ -852,7 +852,10 @@ class _KeyPickBanner extends ConsumerWidget {
 
 /// 底部运行日志面板：最新日志在底部，自动滚动
 class _LogsPanel extends ConsumerStatefulWidget {
-  const _LogsPanel();
+  const _LogsPanel({required this.onClose});
+
+  /// 关闭日志面板（由编辑器收起底部面板）
+  final VoidCallback onClose;
 
   @override
   ConsumerState<_LogsPanel> createState() => _LogsPanelState();
@@ -931,6 +934,21 @@ class _LogsPanelState extends ConsumerState<_LogsPanel> {
                     color: AppColors.inkSecondary,
                   ),
                   label: const Text('清空', style: TextStyle(fontSize: 12)),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: '关闭日志',
+                  onPressed: widget.onClose,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 32,
+                    height: 32,
+                  ),
+                  icon: const Icon(
+                    Icons.close_rounded,
+                    size: 16,
+                    color: AppColors.inkSecondary,
+                  ),
                 ),
               ],
             ),

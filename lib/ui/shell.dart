@@ -45,7 +45,8 @@ class _SideNav extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Container(
       width: 88,
-      color: AppColors.moonWhite,
+      // 侧边栏与右侧页面同色，仅靠分隔线区分
+      color: AppColors.ivory,
       child: Column(
         children: [
           const SizedBox(height: 20),

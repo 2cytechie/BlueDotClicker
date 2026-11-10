@@ -56,8 +56,10 @@ abstract final class AppColors {
   // ── 连线 ─────────────────────────────────────────────────────────
   static const execWire = peacock; // 端口色：执行流（柔空蓝）
   static const dataWire = nodeData; // 端口色：数据流（青玉）
+  static const imageWire = Color(0xFFE8B45C); // 端口色：图像数据（琥珀金）
   static const execWireLine = onAccent; // 画布连线：执行流（白）
   static const dataWireLine = success; // 画布连线：数据流（绿）
+  static const imageWireLine = imageWire; // 画布连线：图像数据（与端口同色）
 }
 
 /// 8pt 体系间距令牌。

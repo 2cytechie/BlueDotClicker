@@ -12,9 +12,12 @@ import '../../models/node_types.dart';
 /// - 连接：执行流边 ↔ control 端口连线，数据边 ↔ data 端口连线（端口 id 即 PortDef.key）
 /// - 端口由 NodeDefinition resolution 派生，GraphNode 无需携带 ports
 
-/// fl.NodePort 颜色（执行流=孔雀蓝，数据=青玉）
-Color _portColor(bool isExec) =>
-    isExec ? AppColors.execWire : AppColors.dataWire;
+/// fl.NodePort 颜色（执行流=孔雀蓝，图像=琥珀金，其余数据=青玉）
+Color _portColor(PortDef p) => p.kind == PortKind.exec
+    ? AppColors.execWire
+    : p.dataType == kPortTypeImage
+    ? AppColors.imageWire
+    : AppColors.dataWire;
 
 fl.NodePort _toFlPort(PortDef p) {
   final isExec = p.kind == PortKind.exec;
@@ -24,7 +27,7 @@ fl.NodePort _toFlPort(PortDef p) {
           label: p.label.isEmpty ? null : p.label,
           kind: isExec ? fl.PortKind.control : fl.PortKind.data,
           dataType: p.dataType,
-          color: _portColor(isExec),
+          color: _portColor(p),
           maxConnections: isExec ? 1 : (p.dir == PortDir.input ? 1 : null),
         )
       : fl.NodePort.output(
@@ -32,7 +35,7 @@ fl.NodePort _toFlPort(PortDef p) {
           label: p.label.isEmpty ? null : p.label,
           kind: isExec ? fl.PortKind.control : fl.PortKind.data,
           dataType: p.dataType,
-          color: _portColor(isExec),
+          color: _portColor(p),
         );
 }
 
@@ -179,11 +182,13 @@ Set<String> graphVarNames(fl.NodeGraph graph) => {
           ((n.data[f.key] as String?) ?? '').trim(),
 };
 
-/// 连线常态颜色：执行流（control 端口）白色、数据连线绿色。
+/// 连线常态颜色：执行流白色、普通数据绿色、图像数据琥珀金（与端口同色）。
 /// 选中/悬停/拖拽预览线仍由编辑器主题控制（高亮态需与常态区分）。
 fl.ConnectionAppearance connectionAppearanceFor(fl.NodePort from) =>
     fl.ConnectionAppearance(
       color: from.kind == fl.PortKind.control
           ? AppColors.execWireLine
+          : from.dataType == kPortTypeImage
+          ? AppColors.imageWireLine
           : AppColors.dataWireLine,
     );

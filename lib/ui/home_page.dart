@@ -42,7 +42,7 @@ class HomePage extends ConsumerWidget {
                     ),
                     OutlinedButton.icon(
                       onPressed: () => _importScript(context, ref),
-                      icon: const Icon(Icons.upload_file_rounded, size: 18),
+                      icon: const Icon(Icons.file_download_rounded, size: 18),
                       label: const Text('导入'),
                     ),
                     const SizedBox(width: 10),
