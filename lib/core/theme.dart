@@ -113,9 +113,15 @@ abstract final class AppShadows {
   ];
 }
 
+/// 全局字体家族（pubspec 中注册的 MiSans）。
+/// 组件主题里显式构造的 TextStyle 不经过 TextTheme，必须带上该 family，
+/// 否则对话框、输入框、菜单、提示等会回退到系统默认字体。
+const String kAppFontFamily = 'MiSans';
+
 /// 排版令牌：页面标题 / 区块标题 / 条目标题 / 正文 / 说明 / 弱化 / 标签。
 abstract final class AppTextStyles {
   static const pageTitle = TextStyle(
+    fontFamily: kAppFontFamily,
     fontSize: 24,
     fontWeight: FontWeight.w600,
     color: AppColors.ink,
@@ -123,47 +129,55 @@ abstract final class AppTextStyles {
     height: 1.25,
   );
   static const subTitle = TextStyle(
+    fontFamily: kAppFontFamily,
     fontSize: 20,
     fontWeight: FontWeight.w600,
     color: AppColors.ink,
     height: 1.3,
   );
   static const sectionTitle = TextStyle(
+    fontFamily: kAppFontFamily,
     fontSize: 15,
     fontWeight: FontWeight.w500,
     color: AppColors.ink,
     height: 1.3,
   );
   static const itemTitle = TextStyle(
+    fontFamily: kAppFontFamily,
     fontSize: 14,
     fontWeight: FontWeight.w400,
     color: AppColors.ink,
     height: 1.35,
   );
   static const body = TextStyle(
+    fontFamily: kAppFontFamily,
     fontSize: 13,
     fontWeight: FontWeight.w400,
     color: AppColors.ink,
     height: 1.5,
   );
   static const caption = TextStyle(
+    fontFamily: kAppFontFamily,
     fontSize: 12,
     fontWeight: FontWeight.w400,
     color: AppColors.inkSecondary,
     height: 1.5,
   );
   static const captionMuted = TextStyle(
+    fontFamily: kAppFontFamily,
     fontSize: 11,
     fontWeight: FontWeight.w400,
     color: AppColors.inkMuted,
     height: 1.4,
   );
   static const label = TextStyle(
+    fontFamily: kAppFontFamily,
     fontSize: 13,
     fontWeight: FontWeight.w400,
     color: AppColors.inkSecondary,
   );
   static const eyebrow = TextStyle(
+    fontFamily: kAppFontFamily,
     fontSize: 11,
     fontWeight: FontWeight.w500,
     color: AppColors.inkSecondary,
@@ -221,7 +235,7 @@ ThemeData buildAppTheme() {
   final base = ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
-    fontFamily: 'MiSans',
+    fontFamily: kAppFontFamily,
     fontFamilyFallback: const [
       'Microsoft YaHei UI',
       'Microsoft YaHei',
@@ -271,7 +285,11 @@ ThemeData buildAppTheme() {
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+        textStyle: const TextStyle(
+          fontFamily: kAppFontFamily,
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+        ),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
@@ -283,7 +301,11 @@ ThemeData buildAppTheme() {
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+        textStyle: const TextStyle(
+          fontFamily: kAppFontFamily,
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+        ),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
@@ -294,7 +316,11 @@ ThemeData buildAppTheme() {
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+        textStyle: const TextStyle(
+          fontFamily: kAppFontFamily,
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+        ),
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
@@ -346,9 +372,18 @@ ThemeData buildAppTheme() {
         borderRadius: BorderRadius.circular(AppRadius.md),
         borderSide: const BorderSide(color: AppColors.danger, width: 1.6),
       ),
-      labelStyle: const TextStyle(fontSize: 13, color: AppColors.inkSecondary),
-      hintStyle: const TextStyle(fontSize: 13, color: AppColors.inkMuted),
+      labelStyle: const TextStyle(
+        fontFamily: kAppFontFamily,
+        fontSize: 13,
+        color: AppColors.inkSecondary,
+      ),
+      hintStyle: const TextStyle(
+        fontFamily: kAppFontFamily,
+        fontSize: 13,
+        color: AppColors.inkMuted,
+      ),
       floatingLabelStyle: const TextStyle(
+        fontFamily: kAppFontFamily,
         fontSize: 12,
         fontWeight: FontWeight.w500,
         color: AppColors.peacock,
@@ -368,11 +403,13 @@ ThemeData buildAppTheme() {
         side: const BorderSide(color: AppColors.outlineSubtle),
       ),
       titleTextStyle: const TextStyle(
+        fontFamily: kAppFontFamily,
         fontSize: 17,
         fontWeight: FontWeight.w600,
         color: AppColors.ink,
       ),
       contentTextStyle: const TextStyle(
+        fontFamily: kAppFontFamily,
         fontSize: 13,
         height: 1.6,
         color: AppColors.inkSecondary,
@@ -387,7 +424,11 @@ ThemeData buildAppTheme() {
         borderRadius: BorderRadius.circular(AppRadius.lg),
         side: const BorderSide(color: AppColors.outlineSubtle),
       ),
-      textStyle: const TextStyle(fontSize: 13, color: AppColors.ink),
+      textStyle: const TextStyle(
+        fontFamily: kAppFontFamily,
+        fontSize: 13,
+        color: AppColors.ink,
+      ),
     ),
     menuTheme: MenuThemeData(
       style: MenuStyle(
@@ -403,7 +444,11 @@ ThemeData buildAppTheme() {
       ),
     ),
     dropdownMenuTheme: DropdownMenuThemeData(
-      textStyle: const TextStyle(fontSize: 13, color: AppColors.ink),
+      textStyle: const TextStyle(
+        fontFamily: kAppFontFamily,
+        fontSize: 13,
+        color: AppColors.ink,
+      ),
       menuStyle: MenuStyle(
         backgroundColor: const WidgetStatePropertyAll(AppColors.moonWhite),
         surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
@@ -423,7 +468,11 @@ ThemeData buildAppTheme() {
         borderRadius: BorderRadius.circular(AppRadius.sm),
         border: Border.all(color: AppColors.outlineSubtle),
       ),
-      textStyle: const TextStyle(fontSize: 12, color: AppColors.ink),
+      textStyle: const TextStyle(
+        fontFamily: kAppFontFamily,
+        fontSize: 12,
+        color: AppColors.ink,
+      ),
     ),
     dividerTheme: const DividerThemeData(
       color: AppColors.outlineSubtle,
@@ -436,7 +485,10 @@ ThemeData buildAppTheme() {
       inactiveTrackColor: AppColors.canvasBg,
       overlayColor: AppColors.peacock.withValues(alpha: 0.12),
       valueIndicatorColor: AppColors.peacockDeep,
-      valueIndicatorTextStyle: const TextStyle(color: AppColors.onAccent),
+      valueIndicatorTextStyle: const TextStyle(
+        fontFamily: kAppFontFamily,
+        color: AppColors.onAccent,
+      ),
     ),
     progressIndicatorTheme: const ProgressIndicatorThemeData(
       color: AppColors.peacock,
@@ -445,7 +497,11 @@ ThemeData buildAppTheme() {
     ),
     snackBarTheme: SnackBarThemeData(
       backgroundColor: AppColors.abyss,
-      contentTextStyle: const TextStyle(fontSize: 13, color: AppColors.ink),
+      contentTextStyle: const TextStyle(
+        fontFamily: kAppFontFamily,
+        fontSize: 13,
+        color: AppColors.ink,
+      ),
       actionTextColor: AppColors.peacockHover,
       behavior: SnackBarBehavior.floating,
       elevation: 8,
@@ -490,8 +546,13 @@ ThemeData buildAppTheme() {
       backgroundColor: AppColors.moonWhite,
       selectedColor: AppColors.peacockSoft,
       disabledColor: AppColors.canvasBg,
-      labelStyle: const TextStyle(fontSize: 12, color: AppColors.ink),
+      labelStyle: const TextStyle(
+        fontFamily: kAppFontFamily,
+        fontSize: 12,
+        color: AppColors.ink,
+      ),
       secondaryLabelStyle: const TextStyle(
+        fontFamily: kAppFontFamily,
         fontSize: 12,
         color: AppColors.inkSecondary,
       ),

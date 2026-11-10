@@ -52,7 +52,7 @@
 
 **[前往 GitHub Releases 下载最新安装包 →](https://github.com/2cytechie/BlueDotClicker/releases)**
 
-- 安装包命名：`蓝点器-Setup-<版本号>.exe`
+- 安装包命名：`BlueDotClicker-Setup-<版本号>.exe`
 - 当前版本：`26.11.10`
 - 历史版本同样在 Releases 页面查看。
 
@@ -68,7 +68,7 @@
 
 ### 安装说明
 
-1. 下载 `蓝点器-Setup-<版本号>.exe`。
+1. 下载 `BlueDotClicker-Setup-<版本号>.exe`。
 2. 双击运行，按向导完成安装。
 3. 当前安装包未做代码签名，Windows SmartScreen 可能提示“已保护你的电脑”。点击“更多信息 → 仍要运行”即可。
 4. 安装完成后从开始菜单或桌面图标启动。
@@ -259,7 +259,7 @@ flutter build windows --release
 ISCC.exe windows\installer\bluedot_clicker.iss
 ```
 
-安装包输出到 `dist\蓝点器-Setup-<版本号>.exe`。版本号需同时修改 `pubspec.yaml` 和 `windows/installer/bluedot_clicker.iss`。
+安装包输出到 `dist\BlueDotClicker-Setup-<版本号>.exe`。版本号需同时修改 `pubspec.yaml` 和 `windows/installer/bluedot_clicker.iss`。
 
 ### 项目结构
 
