@@ -1,0 +1,29 @@
+BlueDot Clicker (蓝点器) - Third-Party Notices
+
+This project uses the following third-party components.
+
+1. pp_ocr
+   License: MIT
+   Copyright: pp_ocr contributors
+   Source: https://github.com/ubuntu2204/paddle_ocr
+
+2. ONNX Runtime
+   License: MIT
+   Copyright: Microsoft Corporation
+   Source: https://github.com/microsoft/onnxruntime
+   Note: bundled with pp_ocr.
+
+3. OpenCV
+   License: Apache License 2.0
+   Copyright: OpenCV contributors
+   Source: https://opencv.org/
+
+4. PaddleOCR PP-OCRv6 models (det / rec ONNX models, character dictionary)
+   License: Apache License 2.0
+   Copyright: PaddlePaddle Authors
+   Source: https://github.com/PaddlePaddle/PaddleOCR
+   Model repositories:
+     https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx
+     https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx
+
+Full license texts are available at the sources listed above.

@@ -2,38 +2,48 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:path_provider/path_provider.dart';
-import 'package:winrt_ocr_flutter/winrt_ocr_flutter.dart';
-
 import 'isolate_matcher.dart';
 import 'opencv_matcher.dart';
+import 'paddle_ocr_engine.dart';
 import 'recognition.dart';
 import 'template_match_dart.dart';
 
-/// Windows 识别服务：OCR 用 Windows.Media.Ocr（winrt_ocr_flutter），
+/// Windows 识别服务：OCR 用 pp_ocr（PaddleOCR PP-OCRv6 + ONNX Runtime），
 /// 模板匹配优先 OpenCV（opencv_dart，TM_CCOEFF_NORMED），
 /// OpenCV 原生库不可用时自动回退纯 Dart 金字塔 NCC。
 ///
-/// 模板匹配优先交给后台 isolate（[IsolateTemplateMatcher]）：匹配在循环轮询
-/// 中每秒可能调用数十次，放在 UI 线程会直接卡住帧渲染。后台不可用时回退主线程。
+/// OCR 与模板匹配都放到后台 isolate：两者一次调用可能占用几十到几百毫秒，
+/// 放在 UI 线程会直接卡住帧渲染。后台不可用时回退：OCR 返回空结果（按
+/// 「未识别到文本」处理），模板匹配回退主线程。
 class WindowsRecognitionService implements RecognitionService {
   WindowsRecognitionService({void Function(String message)? log})
-    : _isolateMatcher = IsolateTemplateMatcher(
+    : _log = log,
+      _isolateMatcher = IsolateTemplateMatcher(
         onDisabled: log == null
             ? null
             : (reason) => log('图像识别后台 isolate 不可用，已回退主线程：$reason'),
+      ),
+      _ocr = IsolatePaddleOcr(
+        onDisabled: log == null ? null : (reason) => log('OCR 不可用：$reason'),
       );
 
   /// OCR 位图相对输入图像的放大倍数（当前不做放大，词框直接为原图像素）。
   static const double ocrScaleFactor = 1.0;
 
+  final void Function(String message)? _log;
   final IsolateTemplateMatcher _isolateMatcher;
+  final IsolatePaddleOcr _ocr;
   final DartTemplateMatcher _dartMatcher = const DartTemplateMatcher();
   final OpenCvMatcher _cvMatcher = const OpenCvMatcher();
   bool? _opencvAvailable;
+  Future<PpOcrModelPaths>? _models;
+  bool _modelErrorLogged = false;
 
-  /// 释放后台匹配 isolate（幂等）
-  void dispose() => _isolateMatcher.dispose();
+  /// 释放后台匹配/OCR isolate（幂等）
+  void dispose() {
+    _ocr.dispose();
+    _isolateMatcher.dispose();
+  }
 
   @override
   bool get isAvailable => Platform.isWindows;
@@ -50,36 +60,25 @@ class WindowsRecognitionService implements RecognitionService {
       ox = 0;
       oy = 0;
     }
-    final png = await _encodePng(img);
-    final dir = await getTemporaryDirectory();
-    // 必须用 Platform.pathSeparator 拼接：WinRT 的 GetFileFromPathAsync
-    // 不接受混合分隔符路径（如 "C:\Temp/x.png"），会抛 0x80070002
-    // 「系统找不到指定的文件」；而 Win32 写入端会自动规范化，导致
-    // 写入成功但原生读取失败的隐蔽错误。
-    final file = File(
-        '${dir.path}${Platform.pathSeparator}bpc_ocr_${DateTime.now().microsecondsSinceEpoch}.png');
-    await file.writeAsBytes(png);
     try {
-      final boxes = await WinrtOcr.recognizeWithBoxes(file.path);
-      // 原生词框基于传入位图像素；若将来对图像做放大，需除以放大倍数还原。
-      final words = [
-        for (final w in boxes.words)
-          OcrWordBox(
-            w.text,
-            (w.x / ocrScaleFactor).round(),
-            (w.y / ocrScaleFactor).round(),
-            (w.w / ocrScaleFactor).round(),
-            (w.h / ocrScaleFactor).round(),
-          ),
-      ];
-      return OcrResult(boxes.text.trim(), x: ox, y: oy, words: words);
-    } on WinrtOcrException {
-      // 无 OCR 语言包等引擎级失败：按「未识别到文本」处理，不中断脚本
+      final png = await _encodePng(img);
+      final models = await (_models ??= ensurePpOcrModels());
+      final raw = await _ocr.tryRecognize(models, png);
+      if (raw == null) {
+        // 引擎不可用 / 超时：按「未识别到文本」处理，不中断脚本
+        return OcrResult('', x: ox, y: oy);
+      }
+      // pp_ocr 返回行级四角框，映射为轴对齐词框；坐标基于传入位图像素。
+      final words = mapPpOcrQuadsToWordBoxes(raw);
+      final text = words.map((w) => w.text).join('\n').trim();
+      return OcrResult(text, x: ox, y: oy, words: words);
+    } catch (e) {
+      // 模型释放失败等主 isolate 侧异常：同样降级为空结果
+      if (!_modelErrorLogged) {
+        _modelErrorLogged = true;
+        _log?.call('OCR 模型/引擎初始化失败：$e');
+      }
       return OcrResult('', x: ox, y: oy);
-    } finally {
-      try {
-        await file.delete();
-      } catch (_) {}
     }
   }
 

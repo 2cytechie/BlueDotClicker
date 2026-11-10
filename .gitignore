@@ -48,3 +48,6 @@ app.*.map.json
 .trae/
 docs/
 dist/
+
+# OpenCV 预编译包
+third_party/opencv/

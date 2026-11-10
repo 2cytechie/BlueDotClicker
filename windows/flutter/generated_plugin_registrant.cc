@@ -7,11 +7,11 @@
 #include "generated_plugin_registrant.h"
 
 #include <file_selector_windows/file_selector_windows.h>
-#include <winrt_ocr_flutter/winrt_ocr_flutter_plugin_c_api.h>
+#include <pp_ocr/paddle_ocr_plugin_c_api.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
   FileSelectorWindowsRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("FileSelectorWindows"));
-  WinrtOcrFlutterPluginCApiRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("WinrtOcrFlutterPluginCApi"));
+  PaddleOcrPluginCApiRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("PaddleOcrPluginCApi"));
 }

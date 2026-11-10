@@ -47,9 +47,22 @@ Windows 自动化工具：基于蓝图工作流的连点器。
 
 ## 开发
 
+### OCR 构建依赖（OpenCV）
+
+文字识别使用 [pp_ocr](https://pub.dev/packages/pp_ocr)（PaddleOCR PP-OCRv6 + ONNX Runtime），
+其 Windows 原生库需要 OpenCV。首次构建前执行一次：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tool/setup_opencv.ps1
+```
+
+也可自行安装 OpenCV 4.x 预编译包，并设置环境变量 `OpenCV_DIR` 指向其 `build` 目录。
+PP-OCRv6 模型已随 `assets/ocr/ppocr_v6/` 提供，无需额外下载。
+
 ```powershell
 flutter pub get
 flutter run -d windows
 flutter analyze
 flutter test
 ```
+

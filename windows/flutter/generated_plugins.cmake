@@ -4,7 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_windows
-  winrt_ocr_flutter
+  pp_ocr
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

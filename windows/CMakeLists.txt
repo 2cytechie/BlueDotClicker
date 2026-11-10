@@ -55,14 +55,25 @@ add_subdirectory("runner")
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
+# pp_ocr 需要 OpenCV：优先使用 tool/setup_opencv.ps1 下载到 third_party/opencv，
+# 其次使用环境变量 OpenCV_DIR，最后交给 pp_ocr 的 CMake 报错提示。
+if(NOT DEFINED OpenCV_DIR)
+  if(DEFINED ENV{OpenCV_DIR})
+    set(OpenCV_DIR "$ENV{OpenCV_DIR}" CACHE PATH "OpenCV build dir" FORCE)
+  elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/opencv/opencv/build/OpenCVConfig.cmake")
+    set(OpenCV_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/opencv/opencv/build" CACHE PATH "OpenCV build dir" FORCE)
+  endif()
+endif()
 include(flutter/generated_plugins.cmake)
 
-# winrt_ocr_flutter 源码头文件含 UTF-8 非 ASCII 字符，
-# 在中文代码页(936)下触发 C4819 警告并被 /WX 视为错误，这里关闭该警告。
-# 插件目标与 runner（generated_plugin_registrant 会 include 插件头）都需要。
-if(TARGET winrt_ocr_flutter_plugin)
-  target_compile_options(winrt_ocr_flutter_plugin PRIVATE /wd4819)
+# pp_ocr 源码为不带 BOM 的 UTF-8 中文注释，MSVC 默认按系统代码页(936)解析
+# 会把部分字节吞进注释/字符串，触发 C4819 与成片的语法错误；显式按 UTF-8 编译。
+# 该第三方源码在 /W4 /WX 下还有 getenv 弃用等告警，这里只对本插件关闭告警即错误。
+if(TARGET pp_ocr_plugin)
+  target_compile_options(pp_ocr_plugin PRIVATE /utf-8 /wd4819 /WX-)
 endif()
+
+
 if(TARGET ${BINARY_NAME})
   target_compile_options(${BINARY_NAME} PRIVATE /wd4819)
   # 源码为不带 BOM 的 UTF-8，显式指定编码，避免 MSVC 按系统代码页(936)解析导致中文窗口标题乱码
@@ -97,6 +108,25 @@ if(PLUGIN_BUNDLED_LIBRARIES)
   install(FILES "${PLUGIN_BUNDLED_LIBRARIES}"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
+endif()
+
+# pp_ocr 通过 find_package 使用动态 OpenCV，DLL 不会由插件自动打包，
+# 这里按构建配置复制对应的 opencv_world*.dll（Debug 用 *d.dll）。
+if(DEFINED OpenCV_DIR)
+  file(GLOB _OPENCV_RELEASE_DLLS "${OpenCV_DIR}/x64/vc*/bin/opencv_world[0-9]*[0-9].dll")
+  file(GLOB _OPENCV_DEBUG_DLLS "${OpenCV_DIR}/x64/vc*/bin/opencv_world*d.dll")
+  if(_OPENCV_RELEASE_DLLS)
+    install(FILES ${_OPENCV_RELEASE_DLLS}
+      DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+      COMPONENT Runtime
+      CONFIGURATIONS Release;Profile)
+  endif()
+  if(_OPENCV_DEBUG_DLLS)
+    install(FILES ${_OPENCV_DEBUG_DLLS}
+      DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+      COMPONENT Runtime
+      CONFIGURATIONS Debug)
+  endif()
 endif()
 
 # Copy the native assets provided by the build.dart from all packages.

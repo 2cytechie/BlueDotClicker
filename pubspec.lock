@@ -480,6 +480,14 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "6.5.4"
+  pp_ocr:
+    dependency: "direct main"
+    description:
+      name: pp_ocr
+      sha256: f96191a34b4feb951dd619dd5879fa69f30e48a616f3d70ab4658a286863adef
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "0.5.4"
   pub_semver:
     dependency: transitive
     description:
@@ -661,13 +669,6 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "1.1.2"
-  winrt_ocr_flutter:
-    dependency: "direct main"
-    description:
-      path: "third_party/winrt_ocr_flutter"
-      relative: true
-    source: path
-    version: "0.1.0"
   xdg_directories:
     dependency: transitive
     description:
