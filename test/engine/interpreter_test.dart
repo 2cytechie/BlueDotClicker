@@ -129,14 +129,26 @@ class MockAutomation implements PlatformAutomation {
 class MockRecognition implements RecognitionService {
   String ocrText = '测试文本';
   List<OcrWordBox> words = const [];
+
+  /// recognizeText 收到的图像（验证「图像优先」时识别的是哪张图）
+  final List<RawImage> ocrCalls = [];
+
+  /// matchTemplate 收到的图像
+  final List<RawImage> matchCalls = [];
+
   @override
   bool get isAvailable => true;
   @override
-  Future<OcrResult> recognizeText(RawImage image, {int? regionX, int? regionY, int? regionW, int? regionH}) async =>
-      OcrResult(ocrText, words: words);
+  Future<OcrResult> recognizeText(RawImage image, {int? regionX, int? regionY, int? regionW, int? regionH}) async {
+    ocrCalls.add(image);
+    return OcrResult(ocrText, words: words);
+  }
+
   @override
-  Future<MatchResult> matchTemplate(RawImage image, RawImage template, {double threshold = 0.8}) async =>
-      const MatchResult(true, 50, 60, 0.95);
+  Future<MatchResult> matchTemplate(RawImage image, RawImage template, {double threshold = 0.8}) async {
+    matchCalls.add(image);
+    return const MatchResult(true, 50, 60, 0.95);
+  }
 }
 
 /// 测试钩子集合：捕获日志/节点高亮，支持注入录制与「等待帧」钩子
@@ -1190,36 +1202,223 @@ void main() {
   });
 
   group('区域裁剪安全（越界不崩溃）', () {
-    // 构造 w×h 纯色图：每 4 字节一个像素（BGRA）
-    RawImage img(int w, int h) => RawImage(w, h, Uint8List(w * h * 4));
-
-    test('正常区域裁剪保持内容与尺寸', () {
-      final src = RawImage(100, 100, Uint8List.fromList(List.filled(100 * 100 * 4, 7, growable: false)));
-      final out = BlueprintInterpreter.cropImage(src, const RectPx(10, 20, 30, 40));
-      expect(out.width, 30);
-      expect(out.height, 40);
-      expect(out.bgra.length, 30 * 40 * 4);
+    // 旧实现会裁剪上游图像；现改为「图像优先 + 现场按区域截屏」，不再裁剪。
+    test('识别节点连接输入图像时直接使用该图像整体（区域不生效）', () async {
+      final recognition = MockRecognition();
+      final automation = MockAutomation();
+      final s = _build([
+        _node('a', 'start'),
+        _node('shot', 'screenshot', {'useRegion': false}),
+        _node('ocr', 'ocr', {
+          'useRegion': true,
+          'left': 500,
+          'top': 500,
+          'right': 700,
+          'bottom': 700,
+        }),
+      ], [
+        _edge('e1', 'a', 'out', 'shot', 'in'),
+        _edge('e2', 'shot', 'out', 'ocr', 'in'),
+        _edge('d1', 'shot', 'imageOut', 'ocr', 'image', kind: EdgeKind.data),
+      ]);
+      final hooks = Hooks();
+      final engine = BlueprintInterpreter(
+        automation: automation,
+        recognition: recognition,
+        hooks: hooks.engineHooks,
+      );
+      await engine.run(s);
+      expect(automation.regions, [null], reason: '截图节点只截一次全屏；识别节点不应再截屏');
+      expect(recognition.ocrCalls, hasLength(1));
+      expect(
+        recognition.ocrCalls.single.width,
+        100,
+        reason: '图像优先：识别的是整张上游图像（mock 全屏 100×100），不按区域二次裁剪',
+      );
     });
 
-    test('区域起点越出图像：钳制到边缘，1×1 不抛 ArgumentError', () {
-      final src = img(100, 100);
-      final out = BlueprintInterpreter.cropImage(src, const RectPx(150, 150, 10, 10));
-      expect(out.width, 1);
-      expect(out.height, 1);
+    test('未连接输入图像时按区域现场截屏，坐标以实际采集原点为准', () async {
+      final automation = MockAutomation()..captureX = -1920;
+      final recognition = MockRecognition();
+      final s = _build([
+        _node('a', 'start'),
+        _node('ocr', 'ocr', {
+          'useRegion': true,
+          'left': -1900,
+          'top': 10,
+          'right': -1800,
+          'bottom': 110,
+        }),
+      ], [
+        _edge('e1', 'a', 'out', 'ocr', 'in'),
+      ]);
+      final hooks = Hooks();
+      final engine = BlueprintInterpreter(
+        automation: automation,
+        recognition: recognition,
+        hooks: hooks.engineHooks,
+      );
+      await engine.run(s);
+      expect(automation.lastRegion, isNotNull);
+      expect(automation.lastRegion!.w, 100);
+      expect(engine.vars, isNotNull);
+      expect(hooks.logs.join(), isNot(contains('失败')));
     });
 
-    test('负起点与超大宽高：钳到图像内', () {
-      final src = img(100, 100);
-      final out = BlueprintInterpreter.cropImage(src, const RectPx(-20, -20, 500, 500));
-      expect(out.width, 100);
-      expect(out.height, 100);
+    test('区域坐标接数据边时，即使未勾选「仅指定区域」也按区域截屏', () async {
+      final automation = MockAutomation();
+      final s = _build([
+        _node('a', 'start'),
+        _node('src', 'setVar', {'name': 'x', 'const': '10'}),
+        _node('shot', 'screenshot', {
+          'useRegion': false,
+          'left': 0,
+          'top': 0,
+          'right': 100,
+          'bottom': 100,
+        }),
+      ], [
+        _edge('e1', 'a', 'out', 'src', 'in'),
+        _edge('e2', 'src', 'out', 'shot', 'in'),
+        _edge('d1', 'src', 'valueOut', 'shot', 'left', kind: EdgeKind.data),
+      ]);
+      await BlueprintInterpreter(
+        automation: automation,
+        recognition: MockRecognition(),
+        hooks: Hooks().engineHooks,
+      ).run(s);
+      final region = automation.lastRegion;
+      expect(region, isNotNull, reason: '坐标有连线时不应截全屏');
+      expect(
+        (region!.x, region.y, region.w, region.h),
+        (10, 0, 90, 100),
+        reason: '左值来自数据边（10），其余取参数',
+      );
     });
 
-    test('部分越界：只保留与图像相交的部分', () {
-      final src = img(100, 100);
-      final out = BlueprintInterpreter.cropImage(src, const RectPx(80, 90, 50, 50));
-      expect(out.width, 20);
-      expect(out.height, 10);
+    test('未连接图像时不复用「上次截图」，按本节点区域重新截屏', () async {
+      final automation = MockAutomation();
+      final s = _build([
+        _node('a', 'start'),
+        _node('shot', 'screenshot', {
+          'useRegion': true,
+          'left': 0,
+          'top': 0,
+          'right': 300,
+          'bottom': 300,
+        }),
+        _node('ocr', 'ocr', {
+          'useRegion': true,
+          'left': 500,
+          'top': 500,
+          'right': 600,
+          'bottom': 600,
+        }),
+      ], [
+        _edge('e1', 'a', 'out', 'shot', 'in'),
+        _edge('e2', 'shot', 'out', 'ocr', 'in'),
+      ]);
+      await BlueprintInterpreter(
+        automation: automation,
+        recognition: MockRecognition(),
+        hooks: Hooks().engineHooks,
+      ).run(s);
+      expect(automation.regions, hasLength(2), reason: '截图节点 + 识别节点各截一次');
+      final ocrRegion = automation.regions.last!;
+      expect(
+        (ocrRegion.x, ocrRegion.y, ocrRegion.w, ocrRegion.h),
+        (500, 500, 100, 100),
+        reason: '识别节点必须按自己的区域截屏，不能复用上一次截图',
+      );
+    });
+  });
+
+  group('调试探针（运行到指定节点之前）', () {
+    test('停在目标节点之前，返回上游图像、区域状态与前置步数', () async {
+      final recognition = MockRecognition();
+      final automation = MockAutomation();
+      final s = _build([
+        _node('a', 'start'),
+        _node('shot', 'screenshot', {
+          'useRegion': true,
+          'left': 10,
+          'top': 20,
+          'right': 110,
+          'bottom': 120,
+        }),
+        _node('ocr', 'ocr', {
+          'useRegion': true,
+          'left': 0,
+          'top': 0,
+          'right': 50,
+          'bottom': 50,
+        }),
+      ], [
+        _edge('e1', 'a', 'out', 'shot', 'in'),
+        _edge('e2', 'shot', 'out', 'ocr', 'in'),
+        _edge('d1', 'shot', 'imageOut', 'ocr', 'image', kind: EdgeKind.data),
+      ]);
+      final hooks = Hooks();
+      final engine = BlueprintInterpreter(
+        automation: automation,
+        recognition: recognition,
+        hooks: hooks.engineHooks,
+      );
+      final probe = await engine.probeBefore(s, 'ocr');
+      expect(probe.reached, isTrue);
+      expect(probe.steps, 2, reason: '开始 + 截图两个前置节点');
+      expect(probe.image, isNotNull);
+      expect(probe.image!.width, 100, reason: '上游截图区域 100×100');
+      expect(probe.imageOrigin.$1, 10);
+      expect(probe.region.enabled, isFalse, reason: '连接输入图像时区域不生效');
+      expect(recognition.ocrCalls, isEmpty, reason: '探针只运行到目标节点之前，不执行它');
+      expect(hooks.logs.join(), contains('已运行到目标节点之前'));
+    });
+
+    test('未连接图像时返回解析后的区域', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('ocr', 'ocr', {
+          'useRegion': true,
+          'left': 500,
+          'top': 500,
+          'right': 600,
+          'bottom': 600,
+        }),
+      ], [
+        _edge('e1', 'a', 'out', 'ocr', 'in'),
+      ]);
+      final engine = BlueprintInterpreter(
+        automation: MockAutomation(),
+        recognition: MockRecognition(),
+        hooks: Hooks().engineHooks,
+      );
+      final probe = await engine.probeBefore(s, 'ocr');
+      expect(probe.reached, isTrue);
+      expect(probe.image, isNull);
+      expect(probe.region.enabled, isTrue);
+      expect(
+        (probe.region.rect!.x, probe.region.rect!.y, probe.region.rect!.w, probe.region.rect!.h),
+        (500, 500, 100, 100),
+      );
+    });
+
+    test('目标节点不可达：reached=false，不误报成功', () async {
+      final s = _build([
+        _node('a', 'start'),
+        _node('orphan', 'ocr', {'useRegion': false}),
+      ], [
+        _edge('e1', 'a', 'out', 'orphan', 'in'),
+      ]);
+      // 删掉执行流入口，模拟"节点没连在链上"
+      s.edges.clear();
+      final engine = BlueprintInterpreter(
+        automation: MockAutomation(),
+        recognition: MockRecognition(),
+        hooks: Hooks().engineHooks,
+      );
+      final probe = await engine.probeBefore(s, 'orphan');
+      expect(probe.reached, isFalse);
     });
   });
 
@@ -1461,7 +1660,7 @@ void main() {
       expect(vars['ok'], false);
     });
 
-    test('截图区域四角点支持数据边；useRegion=false 时忽略坐标', () async {
+    test('截图区域四角点支持数据边；坐标有连线时未勾选也按区域截取', () async {
       final s = _build([
         _node('a', 'start'),
         _node('s1', 'setVar', {'name': 'l', 'const': '10'}),
@@ -1475,7 +1674,13 @@ void main() {
           'right': 400,
           'bottom': 300,
         }),
-        _node('shot2', 'screenshot', {'useRegion': false}),
+        _node('shot2', 'screenshot', {
+          'useRegion': false,
+          'left': 0,
+          'top': 0,
+          'right': 400,
+          'bottom': 300,
+        }),
       ], [
         _edge('e1', 'a', 'out', 's1', 'in'),
         _edge('e2', 's1', 'out', 's2', 'in'),
@@ -1502,7 +1707,10 @@ void main() {
       final r = auto.regions.first;
       expect(r, isNotNull, reason: 'useRegion=true 时角点数据边应生效');
       expect((r!.x, r.y, r.w, r.h), (10, 20, 100, 100));
-      expect(auto.regions.last, isNull, reason: 'useRegion=false 时忽略角点数据边');
+      // 坐标有数据边即视为按区域截取（属性面板会显示为开并锁定开关）
+      final r2 = auto.regions.last;
+      expect(r2, isNotNull, reason: '坐标有连线时不应退回全屏');
+      expect((r2!.x, r2.y, r2.w, r2.h), (10, 0, 100, 300));
     });
 
     test('截图：区域无效时 imageOut 为空，继续执行', () async {
@@ -1530,25 +1738,6 @@ void main() {
   });
 
   group('负坐标截屏（副屏在主屏左侧）', () {
-    RawImage blank(int w, int h) => RawImage(w, h, Uint8List(w * h * 4));
-
-    test('cropImage 按图像原点换算屏幕坐标，负区域不再折回左上角', () {
-      final src = blank(1920, 1080); // 图像原点 (-1920, 0)
-      final out = BlueprintInterpreter.cropImage(
-        src,
-        const RectPx(-1500, 100, 400, 300),
-        originX: -1920,
-      );
-      expect((out.width, out.height), (400, 300));
-
-      // 不传原点时同一区域会被钳成 1 像素宽——证明原点换算确实生效
-      final wrong = BlueprintInterpreter.cropImage(
-        src,
-        const RectPx(-1500, 100, 400, 300),
-      );
-      expect(wrong.width, 1);
-    });
-
     test('截图节点读取区域参数并把负坐标原样传给截屏', () async {
       final s = _build([
         _node('a', 'start'),

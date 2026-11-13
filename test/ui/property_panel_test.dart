@@ -343,16 +343,11 @@ void main() {
       connectSource('x');
       await pumpPanel(tester);
 
-      expect(find.text('X 坐标（锁定）'), findsOneWidget);
-      expect(
-        find.widgetWithText(TextField, 'Y 坐标'),
-        findsOneWidget,
-        reason: 'Y 未连接不应锁定（端口说明区的端口名不算）',
-      );
       expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
-
+      expect(find.text('X 坐标（锁定）'), findsNothing,
+          reason: '锁定态只显示锁图标，不再改写标签文字');
       final xField = tester.widget<TextField>(
-        find.widgetWithText(TextField, 'X 坐标（锁定）'),
+        find.widgetWithText(TextField, 'X 坐标'),
       );
       expect(xField.enabled, isFalse);
       final yField = tester.widget<TextField>(
@@ -391,7 +386,7 @@ void main() {
       await pumpPanel(tester);
 
       final locked = tester.getRect(
-        find.widgetWithText(TextField, 'X 坐标（锁定）'),
+        find.widgetWithText(TextField, 'X 坐标'),
       );
       final editable = tester.getRect(find.widgetWithText(TextField, 'Y 坐标'));
       expect(
@@ -418,11 +413,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('-809'), findsOneWidget, reason: '解锁后仍显示参数真实值');
-      expect(
+      final xField = tester.widget<TextField>(
         find.widgetWithText(TextField, 'X 坐标'),
-        findsOneWidget,
-        reason: '解锁后标签不再带「（锁定）」',
       );
+      expect(xField.enabled, isNot(isFalse), reason: '解除连接后恢复可编辑');
+      expect(find.byIcon(Icons.lock_outline_rounded), findsNothing);
     });
   });
 
@@ -515,12 +510,13 @@ void main() {
       expect(connId, isNotNull, reason: '诊断：连接应建立');
       await tester.pumpAndSettle();
 
-      expect(find.text('目标文本（锁定）'), findsOneWidget);
       final locked = tester.widget<TextField>(
-        find.widgetWithText(TextField, '目标文本（锁定）'),
+        find.widgetWithText(TextField, '目标文本'),
       );
       expect(locked.enabled, isFalse);
       expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
+      expect(find.text('目标文本（锁定）'), findsNothing,
+          reason: '锁定态只显示锁图标，不再改写标签文字');
     });
 
     testWidgets('图像识别：超长文件名中段截断并保留扩展名，Tooltip 显示完整路径', (tester) async {
@@ -537,6 +533,104 @@ void main() {
           reason: '长文件名应中段截断并保留 .png 扩展名');
       // 悬浮提示显示完整路径
       expect(find.byTooltip('C:/pics/$longName'), findsOneWidget);
+    });
+  });
+
+  group('图像优先：连接输入图像后锁定区域', () {
+    testWidgets('识别节点连接 image 输入：区域字段锁定、框选按钮关闭并给出提示', (tester) async {
+      controller.addNode(
+        blueprintNodeRegistry.instantiate('screenshot', id: 'shot', position: const Offset(0, 300)),
+      );
+      controller.addNode(
+        blueprintNodeRegistry.instantiate('ocr', id: 'ocr1', position: Offset.zero),
+      );
+      controller.connect(
+        fl.PortRef('shot', 'imageOut'),
+        fl.PortRef('ocr1', 'image'),
+      );
+      controller.selection.selectNode('ocr1');
+      await pumpPanel(tester);
+
+      expect(
+        find.text('已连接「输入图像」：识别范围就是该图像整体，区域设置不生效'),
+        findsOneWidget,
+      );
+      final leftField = tester.widget<TextField>(
+        find.widgetWithText(TextField, '左上角X'),
+      );
+      expect(leftField.enabled, isFalse);
+      final regionSwitch = tester.widget<SwitchListTile>(
+        find.widgetWithText(SwitchListTile, '仅指定区域'),
+      );
+      expect(regionSwitch.onChanged, isNull, reason: '连接输入图像后区域开关应锁定');
+      expect(find.byTooltip('框选区域'), findsNothing, reason: '区域不生效时框选入口关闭');
+    });
+
+    testWidgets('未连接 image 输入：区域字段保持可编辑，框选按钮可见', (tester) async {
+      controller.addNode(
+        blueprintNodeRegistry.instantiate('ocr', id: 'ocr2', position: Offset.zero),
+      );
+      controller.selection.selectNode('ocr2');
+      await pumpPanel(tester);
+
+      final leftField = tester.widget<TextField>(
+        find.widgetWithText(TextField, '左上角X'),
+      );
+      expect(leftField.enabled, isNot(isFalse));
+      expect(find.byTooltip('框选区域'), findsOneWidget);
+    });
+  });
+
+  group('截图区域坐标接数据边', () {
+    testWidgets('任一坐标连线：仅指定区域开关自动开启并锁定', (tester) async {
+      controller.addNode(
+        blueprintNodeRegistry.instantiate('setVar', id: 'src1', position: const Offset(0, 300)),
+      );
+      controller.addNode(
+        blueprintNodeRegistry.instantiate('screenshot', id: 'shot', position: Offset.zero),
+      );
+      controller.connect(
+        fl.PortRef('src1', 'valueOut'),
+        fl.PortRef('shot', 'left'),
+      );
+      controller.selection.selectNode('shot');
+      await pumpPanel(tester);
+
+      expect(
+        find.text('区域坐标已由数据输入接管：已自动开启并锁定「仅指定区域」'),
+        findsOneWidget,
+      );
+      final regionSwitch = tester.widget<SwitchListTile>(
+        find.widgetWithText(SwitchListTile, '仅指定区域'),
+      );
+      expect(regionSwitch.value, isTrue, reason: '坐标有连线时应显示为已开启');
+      expect(regionSwitch.onChanged, isNull, reason: '连接后开关应锁定');
+      final leftField = tester.widget<TextField>(
+        find.widgetWithText(TextField, '左上角X'),
+      );
+      expect(leftField.enabled, isFalse);
+      // 未连线的右下角仍可编辑（只锁定接了数据边的那一项）
+      final rightField = tester.widget<TextField>(
+        find.widgetWithText(TextField, '右下角X'),
+      );
+      expect(rightField.enabled, isNot(isFalse));
+    });
+
+    testWidgets('未连接坐标输入：开关可自由切换，无接管提示', (tester) async {
+      controller.addNode(
+        blueprintNodeRegistry.instantiate('screenshot', id: 'shot2', position: Offset.zero),
+      );
+      controller.selection.selectNode('shot2');
+      await pumpPanel(tester);
+
+      final regionSwitch = tester.widget<SwitchListTile>(
+        find.widgetWithText(SwitchListTile, '仅指定区域'),
+      );
+      expect(regionSwitch.onChanged, isNotNull);
+      expect(
+        find.text('区域坐标已由数据输入接管：已自动开启并锁定「仅指定区域」'),
+        findsNothing,
+      );
     });
   });
 }

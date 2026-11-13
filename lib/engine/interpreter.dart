@@ -1,8 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
-
 import '../models/blueprint.dart';
 import '../models/key_names.dart';
 import '../platform/platform_automation.dart';
@@ -35,6 +33,44 @@ class EngineHooks {
   static Future<Recording?> _defaultLoadRecording(String id) async => null;
 }
 
+/// 调试探针快照：从开始节点运行到目标节点「之前」时，目标节点的运行时输入。
+/// 供属性面板「节点测试」复现真实执行路径（会真实执行前置节点）。
+class ProbeSnapshot {
+  /// 是否真的运行到了目标节点（没有连线/不可达时为 false）
+  final bool reached;
+
+  /// 已连接的输入图像（未连接时为 null）
+  final RawImage? image;
+
+  /// 输入图像的左上角屏幕坐标（虚拟桌面坐标，可为负）
+  final (int, int) imageOrigin;
+
+  /// 需要现场截屏的区域；连接了输入图像时为 disabled（图像优先）
+  final RegionParse region;
+
+  /// 已解析的数据输入（目前含 targetText）
+  final Map<String, Object?> inputs;
+
+  /// 前置执行经过的节点数
+  final int steps;
+
+  const ProbeSnapshot({
+    required this.reached,
+    required this.image,
+    required this.imageOrigin,
+    required this.region,
+    required this.inputs,
+    required this.steps,
+  });
+
+  const ProbeSnapshot.miss({this.steps = 0})
+      : reached = false,
+        image = null,
+        imageOrigin = (0, 0),
+        region = const RegionParse.disabled(),
+        inputs = const {};
+}
+
 /// 蓝图解释执行引擎：从开始节点沿执行流遍历，数据端口沿数据边取值。
 /// 单实例对应一次运行（或复用时需先 reset）。
 class BlueprintInterpreter {
@@ -52,11 +88,8 @@ class BlueprintInterpreter {
   bool _stopped = false;
   bool _running = false;
 
-  /// 最近一次截图（screenshot/ocr/imageMatch 节点共享）
-  RawImage? _lastImage;
-
   /// 图像左上角对应的屏幕坐标（虚拟桌面坐标，副屏在主屏左侧时可为负）。
-  /// 截图与裁剪都会登记，区域坐标换算与识别结果回算都以此为准。
+  /// 截图时按实际采集原点登记，识别结果回算屏幕坐标以此为准。
   final Expando<(int, int)> _imageOrigin = Expando<(int, int)>('imageOrigin');
 
   /// 输出数据端口缓存（本次运行内有效）
@@ -96,7 +129,25 @@ class BlueprintInterpreter {
   /// 距上次等待帧的时间：用于把快速空转的循环压到约每帧一轮
   final Stopwatch _frameWatch = Stopwatch()..start();
 
+  /// 调试探针目标节点：运行到它之前停下（null = 正常执行）
+  String? _probeNodeId;
+  bool _probeHit = false;
+  int _probeSteps = 0;
+  ProbeSnapshot? _probeSnapshot;
+
   bool get isRunning => _running;
+
+  /// 调试探针：从「开始」节点沿执行流运行到 [nodeId] **之前**停下，
+  /// 返回该节点此刻的运行时输入（已连接的图像 / 区域 / 数据输入）。
+  /// 前置节点会真实执行（会操作鼠标键盘），可用 [stop] 中止。
+  Future<ProbeSnapshot> probeBefore(BlueprintScript script, String nodeId) async {
+    _probeNodeId = nodeId;
+    _probeHit = false;
+    _probeSteps = 0;
+    _probeSnapshot = null;
+    await run(script);
+    return _probeSnapshot ?? ProbeSnapshot.miss(steps: _probeSteps);
+  }
 
   void stop() => _stopped = true;
 
@@ -105,13 +156,13 @@ class BlueprintInterpreter {
     _running = true;
     _stopped = false;
     vars = VariableTable(initialVars ?? script.variables);
-    _lastImage = null;
     _portValues.clear();
     _warnedNodes.clear();
     _pressedKeys.clear();
     _activeLoops.clear();
     _notifiedNodeId = null;
     _frameWatch.reset();
+    _probeHit = false;
     try {
       final start = script.findStart();
       if (start == null) {
@@ -127,15 +178,18 @@ class BlueprintInterpreter {
       while (!_stopped && (forever || round < count)) {
         round++;
         if (!forever && count > 1) hooks.log('—— 第 $round/$count 次 ——');
-        // 每轮清空端口与截图缓存（变量表跨轮保留，可作累计器）
+        // 每轮清空端口缓存（变量表跨轮保留，可作累计器）
         _portValues.clear();
-        _lastImage = null;
         await _exec(script, start, 'enter');
         // 还有下一轮时才需要让出：多轮执行（含 count=0 一直执行）之间若不让出，
         // 「开始→短链」会以微任务/零时长定时器连续空转，饿死帧回调与 F10 轮询。
         if (!_stopped && (forever || round < count)) await _cooperate();
       }
-      hooks.log(_stopped ? '■ 已停止' : '✓ 执行完成');
+      if (_probeHit) {
+        hooks.log('⏸ 调试：已运行到目标节点之前（前置节点 $_probeSteps 个）');
+      } else {
+        hooks.log(_stopped ? '■ 已停止' : '✓ 执行完成');
+      }
     } on UnsupportedError catch (e) {
       hooks.log('✗ 平台不支持：${e.message}');
     } catch (e) {
@@ -144,6 +198,7 @@ class BlueprintInterpreter {
       await _releaseHeldInputs();
       _notifyNode(null);
       _activeLoops.clear();
+      _probeNodeId = null;
       _running = false;
     }
   }
@@ -166,6 +221,14 @@ class BlueprintInterpreter {
       // 循环体经执行流连回了同一循环节点：视为本轮循环体结束，
       // 交回 _executeLoop 重新判定条件（避免递归嵌套与假出口重复执行）
       if (_activeLoops.contains(n.id)) return;
+      // 调试探针：到达目标节点前停下，快照它此刻的运行时输入，不执行它本身
+      if (n.id == _probeNodeId) {
+        await _takeProbe(script, n);
+        _probeHit = true;
+        _stopped = true;
+        return;
+      }
+      if (_probeNodeId != null) _probeSteps++;
       _notifyNode(n.id);
       final outKey = await _execute(script, n, inPort);
       if (_stopped) return;
@@ -246,22 +309,20 @@ class BlueprintInterpreter {
           final region = await _resolveRegion(script, n);
           if (region.enabled && !region.valid) {
             hooks.log('截图失败：区域无效（宽或高为 0）');
-            _lastImage = null;
             _writeOut(n, 'imageOut', null);
             return 'out';
           }
           // 区域坐标支持负值（副屏在主屏左侧/上方时为负）
-          _lastImage = await _captureNow(region: region.rect);
-          _portValues[PortRef(nodeId: n.id, port: 'imageOut')] = _lastImage;
-          final ok = _lastImage != null;
-          hooks.log(
-              '截图 ${ok ? '${_lastImage!.width}×${_lastImage!.height}' : '失败'}');
+          final shot = await _captureNow(region: region.rect);
+          _portValues[PortRef(nodeId: n.id, port: 'imageOut')] = shot;
+          final ok = shot != null;
+          hooks.log('截图 ${ok ? '${shot.width}×${shot.height}' : '失败'}');
           return 'out';
         }
 
       case 'ocr':
         {
-          final region = await _resolveRegion(script, n);
+          final region = await _resolveMediaRegion(script, n);
           if (region.enabled && !region.valid) {
             hooks.log('OCR 失败：区域无效（宽或高为 0）');
             _writeOcrFailure(n);
@@ -281,12 +342,10 @@ class BlueprintInterpreter {
           // 目标非空 = 命中文字包围盒中心，未命中为 -1。
           final (imgX, imgY) = _imageOrigin[img] ?? (0, 0);
           var found = res.text.isNotEmpty;
-          var cx = region.rect != null
-              ? region.rect!.x + region.rect!.w ~/ 2
-              : imgX + img.width ~/ 2;
-          var cy = region.rect != null
-              ? region.rect!.y + region.rect!.h ~/ 2
-              : imgY + img.height ~/ 2;
+          // 以图像自身原点换算中心：区域被屏幕边界钳制、或直接使用上游图像时
+          // 都不会像「请求区域 + 宽/2」那样产生偏移。
+          var cx = imgX + img.width ~/ 2;
+          var cy = imgY + img.height ~/ 2;
           if (target.trim().isNotEmpty) {
             final hit = findOcrTarget(res.words, target);
             if (hit != null) {
@@ -331,7 +390,7 @@ class BlueprintInterpreter {
             return 'out';
           }
           final threshold = (n.params['threshold'] as num?)?.toDouble() ?? 0.8;
-          final region = await _resolveRegion(script, n);
+          final region = await _resolveMediaRegion(script, n);
           if (region.enabled && !region.valid) {
             hooks.log('图像识别失败：区域无效（宽或高为 0）');
             _setFound(n, false);
@@ -795,7 +854,13 @@ class BlueprintInterpreter {
     BlueprintScript script,
     BPNode n,
   ) async {
-    if (n.params['useRegion'] != true) return const RegionParse.disabled();
+    // 「仅指定区域」未勾选时通常截全屏；但只要任一区域坐标接了数据边，
+    // 就视为按区域截取（属性面板会把开关显示为开并锁定），避免连线被静默忽略。
+    final cornerDriven = const ['left', 'top', 'right', 'bottom']
+        .any((p) => script.inEdges(n.id, p, kind: EdgeKind.data).isNotEmpty);
+    if (n.params['useRegion'] != true && !cornerDriven) {
+      return const RegionParse.disabled();
+    }
     final l = await _mouseCoord(script, n, 'left');
     final t = await _mouseCoord(script, n, 'top');
     final r = await _mouseCoord(script, n, 'right');
@@ -839,55 +904,68 @@ class BlueprintInterpreter {
 
   /// 获取节点输入图像：数据边 > 上次截图 > 现场截屏。
   /// 区域裁剪按图像自身的屏幕原点换算，负坐标区域（副屏）同样有效。
+  /// 获取识别节点的输入图像：**图像优先**。
+  /// - 连接了「输入图像」数据边 → 直接使用该图像整体（区域设置不生效，面板中锁定）；
+  /// - 未连接 → 按区域现场截屏（区域为空则截取整个虚拟桌面）。
+  /// 不再隐式复用「上次截图」：区域与旧图不匹配时会被静默裁到边界，
+  /// 导致识别的不是指定区域、输出坐标还整体偏移。
   Future<RawImage?> _acquireImage(BlueprintScript script, BPNode n, {RectPx? region}) async {
-    RawImage? img;
     final dataEdges = script.inEdges(n.id, 'image', kind: EdgeKind.data);
     if (dataEdges.isNotEmpty) {
       final v = await _readDataPort(script, dataEdges.first.from);
-      if (v is RawImage) img = v;
+      if (v is RawImage) return v;
+      // 数据边存在但上游未产出图像（上游截图失败等）：回退现场截屏，避免整段识别中断
     }
-    img ??= _lastImage;
-    img ??= await _captureNow();
-    if (img == null) return null;
-    if (region == null) return img;
-    final (ox, oy) = _imageOrigin[img] ?? (0, 0);
-    final cropped = cropImage(img, region, originX: ox, originY: oy);
-    _imageOrigin[cropped] = (region.x, region.y);
-    return cropped;
+    return _captureNow(region: region);
+  }
+
+  /// 识别节点的有效区域：连接了输入图像时区域不生效（图像优先）。
+  Future<RegionParse> _resolveMediaRegion(
+    BlueprintScript script,
+    BPNode n,
+  ) async {
+    if (script.inEdges(n.id, 'image', kind: EdgeKind.data).isNotEmpty) {
+      return const RegionParse.disabled();
+    }
+    return _resolveRegion(script, n);
+  }
+
+  /// 采集调试探针快照：目标节点此刻的输入图像 / 区域 / 数据输入。
+  Future<void> _takeProbe(BlueprintScript script, BPNode n) async {
+    RawImage? image;
+    final imageEdges = script.inEdges(n.id, 'image', kind: EdgeKind.data);
+    if (imageEdges.isNotEmpty) {
+      final v = await _readDataPort(script, imageEdges.first.from);
+      if (v is RawImage) image = v;
+    }
+    final region = image != null
+        ? const RegionParse.disabled()
+        : await _resolveRegion(script, n);
+    final inputs = <String, Object?>{};
+    if (script.inEdges(n.id, 'targetText', kind: EdgeKind.data).isNotEmpty) {
+      inputs['targetText'] =
+          await _resolveInput(script, n, 'targetText', 'targetText');
+    }
+    _probeSnapshot = ProbeSnapshot(
+      reached: true,
+      image: image,
+      imageOrigin: image == null ? (0, 0) : (_imageOrigin[image] ?? (0, 0)),
+      region: region,
+      inputs: inputs,
+      steps: _probeSteps,
+    );
   }
 
   Future<RawImage?> _captureNow({RectPx? region}) async {
     try {
       final cap = await automation.capture(region: region);
       final img = RawImage(cap.width, cap.height, cap.bgra);
+      // 钳制后的实际采集原点：坐标换算必须以它为准
       _imageOrigin[img] = (cap.x, cap.y);
       return img;
     } on UnsupportedError {
       return null;
     }
-  }
-
-  /// 裁剪图像区域。屏幕坐标先减去图像原点换算为图像内偏移，越界部分按
-  /// 图像边缘截断；负原点（副屏在主屏左侧）不会被折回图像左上角。
-  @visibleForTesting
-  static RawImage cropImage(
-    RawImage img,
-    RectPx r, {
-    int originX = 0,
-    int originY = 0,
-  }) {
-    final left = (r.x - originX).clamp(0, img.width - 1);
-    final top = (r.y - originY).clamp(0, img.height - 1);
-    final right = (r.x - originX + r.w).clamp(left + 1, img.width);
-    final bottom = (r.y - originY + r.h).clamp(top + 1, img.height);
-    final w = right - left;
-    final h = bottom - top;
-    final result = Uint8List(w * h * 4);
-    for (var row = 0; row < h; row++) {
-      final srcStart = ((top + row) * img.width + left) * 4;
-      result.setRange(row * w * 4, (row + 1) * w * 4, img.bgra, srcStart);
-    }
-    return RawImage(w, h, result);
   }
 
   /// 获取模板（带缓存与错误日志）

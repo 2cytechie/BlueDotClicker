@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -8,12 +9,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme.dart';
+import '../../engine/interpreter.dart';
 import '../../models/blueprint.dart';
 import '../../models/key_names.dart';
 import '../../models/node_types.dart';
 import '../../services/media_tester.dart';
+import '../../state/frame_yield.dart';
 import '../../state/providers.dart';
-import 'node_bridge.dart' show graphVarNames;
+import 'node_bridge.dart' show graphToBlueprint, graphVarNames;
 
 /// 属性面板：编辑当前选中节点的参数（数据存储于 GraphNode.data，
 /// 经 NodeEditorController.updateNode 提交，支持撤销/重做）
@@ -156,18 +159,34 @@ class PropertyPanel extends ConsumerWidget {
     final actionsByKeyX = _coordActions(node, data);
     // 数据输入已连接且接管了某个参数 → 参数灰显只读并保留原值。
     // 默认同名接管；`lockedByPort` 支持不同名映射（如 setVar.value → const）。
+    // 识别节点连接「输入图像」后图像优先：区域参数整体不生效并锁定只读
+    final imageInputConnected = _hasDataInput(node, 'image');
+    // 截图节点：任一区域坐标（左/上/右/下）接了数据边 → 区域由数据驱动，
+    // 「仅指定区域」强制开启并锁定，避免出现「坐标有连线但开关被关掉」的静默忽略
+    final regionDrivenByData = const ['left', 'top', 'right', 'bottom']
+        .any((p) => _hasDataInput(node, p));
     final lockedKeys = <String>{
       for (final f in def.params)
         if (_hasDataInput(node, f.lockedByPort ?? f.key)) f.key,
+      if (imageInputConnected) ...const ['useRegion', 'left', 'top', 'right', 'bottom'],
+      if (regionDrivenByData) 'useRegion',
     };
     // 媒体节点区域可通过屏幕框选获取：左上角 X/Y 行尾放框选按钮
+    // （连接输入图像时区域不生效，框选入口一并关闭）
     final regionPickable =
-        def.category == NodeCategory.media && data['useRegion'] != null;
+        def.category == NodeCategory.media &&
+        data['useRegion'] != null &&
+        !imageInputConnected;
     final children = <Widget>[];
     var i = 0;
     while (i < params.length) {
       final f = params[i];
       final next = i + 1 < params.length ? params[i + 1] : null;
+      if (f.key == 'useRegion' && imageInputConnected) {
+        children.add(const _RegionLockedHint());
+      } else if (f.key == 'useRegion' && regionDrivenByData) {
+        children.add(const _RegionDrivenHint());
+      }
       if (next != null &&
           _kCoordPairs.any((p) => p.$1 == f.key && p.$2 == next.key)) {
         final actions = actionsByKeyX[f.key];
@@ -216,7 +235,15 @@ class PropertyPanel extends ConsumerWidget {
         continue;
       }
       children.add(
-        _buildField(ref, node, f, locked: lockedKeys.contains(f.key)),
+        _buildField(
+          ref,
+          node,
+          f,
+          locked: lockedKeys.contains(f.key),
+          // 区域由数据驱动时开关显示为开（实际执行也按区域截取）
+          boolValueOverride:
+              f.key == 'useRegion' && regionDrivenByData ? true : null,
+        ),
       );
       i += 1;
     }
@@ -228,7 +255,7 @@ class PropertyPanel extends ConsumerWidget {
     if (nodeDef(node.type).category != NodeCategory.media) {
       return const SizedBox.shrink();
     }
-    return _MediaTestSection(node: node);
+    return _MediaTestSection(node: node, controller: controller);
   }
 
   /// 端口说明区：分「输入」「输出」两组列出填写了说明的数据端口，
@@ -272,6 +299,7 @@ class PropertyPanel extends ConsumerWidget {
     fl.GraphNode node,
     ParamFieldDef f, {
     bool locked = false,
+    bool? boolValueOverride,
   }) {
     void onCommit(Object v) => _commit(node, f, v);
     switch (f.type) {
@@ -314,16 +342,31 @@ class PropertyPanel extends ConsumerWidget {
           suggestions: _varNameSuggestions(ref),
         );
       case ParamType.bool:
-        final v = node.data[f.key];
+        final v = boolValueOverride ?? node.data[f.key];
         return SwitchListTile(
           contentPadding: EdgeInsets.zero,
           dense: true,
-          title: Text(
-            f.label,
-            style: const TextStyle(fontSize: 13, color: AppColors.ink),
+          title: Row(
+            children: [
+              Text(
+                f.label,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: locked ? AppColors.inkSecondary : AppColors.ink,
+                ),
+              ),
+              if (locked) ...[
+                const SizedBox(width: 4),
+                const Icon(
+                  Icons.lock_outline_rounded,
+                  size: 14,
+                  color: AppColors.inkSecondary,
+                ),
+              ],
+            ],
           ),
           value: v is bool ? v : f.defaultValue == true,
-          onChanged: onCommit,
+          onChanged: locked ? null : onCommit,
         );
       case ParamType.enum_:
         final current =
@@ -575,6 +618,64 @@ class _CoordActions {
   final PickTarget? pick;
   final ScreenLocateTarget? locate;
   const _CoordActions({this.pick, this.locate});
+}
+
+/// 连接「输入图像」后的区域锁定提示：图像优先，区域参数不生效。
+class _RegionLockedHint extends StatelessWidget {
+  const _RegionLockedHint();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Icon(
+            Icons.info_outline_rounded,
+            size: 14,
+            color: AppColors.inkSecondary,
+          ),
+          SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              '已连接「输入图像」：识别范围就是该图像整体，区域设置不生效',
+              style: TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 区域坐标接了数据边时的提示：开关强制开启并锁定。
+class _RegionDrivenHint extends StatelessWidget {
+  const _RegionDrivenHint();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Icon(
+            Icons.info_outline_rounded,
+            size: 14,
+            color: AppColors.inkSecondary,
+          ),
+          SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              '区域坐标已由数据输入接管：已自动开启并锁定「仅指定区域」',
+              style: TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// 坐标输入框上方的操作条：「拾取坐标」「屏幕定位」各占一半宽度。
@@ -925,7 +1026,8 @@ class _ParamTextFieldState extends State<_ParamTextField> {
             : TextInputType.number,
         style: const TextStyle(fontSize: 13, color: AppColors.ink),
         decoration: InputDecoration(
-          labelText: widget.locked ? '${f.label}（锁定）' : f.label,
+          labelText: f.label,
+          // 锁定态只显示锁图标：图标已足够明确，不再改写标签文字
           hintText: hint,
           suffixIcon: widget.locked
               ? const Icon(
@@ -1383,11 +1485,12 @@ class _PortDocHeader extends StatelessWidget {
   }
 }
 
-/// 媒体节点测试区：按当前参数执行一次采集/识别，弹窗展示结果
+/// 媒体节点测试区：先运行前置节点，再按真实输入测试本节点并弹窗展示结果
 class _MediaTestSection extends ConsumerStatefulWidget {
-  const _MediaTestSection({required this.node});
+  const _MediaTestSection({required this.node, required this.controller});
 
   final fl.GraphNode node;
+  final fl.NodeEditorController controller;
 
   @override
   ConsumerState<_MediaTestSection> createState() => _MediaTestSectionState();
@@ -1395,6 +1498,13 @@ class _MediaTestSection extends ConsumerStatefulWidget {
 
 class _MediaTestSectionState extends ConsumerState<_MediaTestSection> {
   bool _busy = false;
+  BlueprintInterpreter? _probeEngine;
+
+  /// 全局停止热键 F10（与整包运行一致）
+  static const int _vkF10 = 0x79;
+
+  /// 调试运行的安全上限：避免前置节点里的无限循环一直跑
+  static const Duration _probeTimeout = Duration(seconds: 60);
 
   String get _label => switch (widget.node.type) {
     'screenshot' => '测试截图',
@@ -1404,23 +1514,79 @@ class _MediaTestSectionState extends ConsumerState<_MediaTestSection> {
   };
 
   Future<void> _run() async {
-    if (_busy) return;
+    // 运行中再次点击 = 停止调试运行（按钮同时可被 F10 中止）
+    if (_busy) {
+      _probeEngine?.stop();
+      return;
+    }
+    if (ref.read(runnerProvider).running) {
+      _showMessage('脚本正在运行，请先停止后再测试');
+      return;
+    }
+    final script = _currentAsScript();
+    if (script == null) {
+      _showMessage('无法构建当前蓝图（缺少开始节点）');
+      return;
+    }
     setState(() => _busy = true);
+    final automation = ref.read(automationProvider);
+    final logs = <String>[];
+    final engine = BlueprintInterpreter(
+      automation: automation,
+      recognition: ref.read(recognitionProvider),
+      hooks: EngineHooks(
+        log: logs.add,
+        onNodeChange: (_) {},
+        yieldToFrame: waitForNextFrame,
+      ),
+    );
+    _probeEngine = engine;
+    // 前置节点会真实操作鼠标键盘：期间同样支持 F10 中止
+    final hotkey = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (automation.isKeyDown(_vkF10)) engine.stop();
+    });
+    var timedOut = false;
+    final timeout = Timer(_probeTimeout, () {
+      timedOut = true;
+      engine.stop();
+    });
     MediaTestResult result;
     Uint8List? png;
     try {
-      result = await ref
-          .read(mediaTesterProvider)
-          .runTest(widget.node.type, widget.node.data);
-      final preview = result.preview;
-      if (preview != null) {
-        // 预览图编码失败不影响文本结果展示
-        try {
-          png = await preview.toPng();
-        } catch (_) {}
+      final probe = await engine.probeBefore(script, widget.node.id);
+      if (timedOut && !probe.reached) {
+        result = const MediaTestResult(
+          ok: false,
+          title: '调试运行超时',
+          lines: ['前置节点运行超过 60 秒，已停止。请检查循环是否有退出条件。'],
+        );
+      } else {
+        final inputs = MediaTestInputs(
+          reached: probe.reached,
+          image: probe.image,
+          imageOrigin: probe.imageOrigin,
+          region: probe.region,
+          targetText: probe.inputs['targetText']?.toString(),
+          steps: probe.steps,
+          logs: logs,
+        );
+        result = await ref
+            .read(mediaTesterProvider)
+            .runTest(widget.node.type, widget.node.data, inputs: inputs);
+        final preview = result.preview;
+        if (preview != null) {
+          // 预览图编码失败不影响文本结果展示
+          try {
+            png = await preview.toPng();
+          } catch (_) {}
+        }
       }
     } catch (e) {
       result = MediaTestResult(ok: false, title: '测试失败', lines: ['$e']);
+    } finally {
+      hotkey.cancel();
+      timeout.cancel();
+      _probeEngine = null;
     }
     if (!mounted) return;
     setState(() => _busy = false);
@@ -1430,6 +1596,23 @@ class _MediaTestSectionState extends ConsumerState<_MediaTestSection> {
     );
   }
 
+  /// 当前编辑器图 → 可执行蓝图（与整包运行的构建方式一致）
+  BlueprintScript? _currentAsScript() {
+    final loaded = ref.read(currentScriptProvider);
+    final script = graphToBlueprint(
+      widget.controller.graph,
+      name: loaded?.name ?? '未命名',
+      createdAt: loaded?.createdAt,
+      variables: Map<String, Object>.of(ref.read(scriptVariablesProvider)),
+    );
+    return script.nodes.values.any((n) => n.type == 'start') ? script : null;
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -1437,17 +1620,20 @@ class _MediaTestSectionState extends ConsumerState<_MediaTestSection> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '节点测试（按当前参数执行一次）',
-            style: TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+          Text(
+            _busy ? '正在运行前置节点…（F10 或再次点击可停止）' : '节点测试（先运行前置节点，再测试本节点）',
+            style: const TextStyle(fontSize: 12, color: AppColors.inkSecondary),
           ),
           const SizedBox(height: 6),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: _busy ? null : _run,
-              icon: const Icon(Icons.science_outlined, size: 18),
-              label: Text(_busy ? '测试中…' : _label),
+              onPressed: _run,
+              icon: Icon(
+                _busy ? Icons.stop_circle_outlined : Icons.science_outlined,
+                size: 18,
+              ),
+              label: Text(_busy ? '停止调试运行' : _label),
             ),
           ),
         ],
@@ -1510,6 +1696,40 @@ class _MediaTestResultDialog extends StatelessWidget {
                   style: const TextStyle(fontSize: 13, color: AppColors.ink),
                 ),
               ),
+            if (result.debugLogs.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              const Text(
+                '前置节点日志（最近 10 条）',
+                style: TextStyle(fontSize: 12, color: AppColors.inkSecondary),
+              ),
+              const SizedBox(height: 4),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 140),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.canvasBg,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final log in result.debugLogs.length > 10
+                        ? result.debugLogs.sublist(result.debugLogs.length - 10)
+                        : result.debugLogs)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: SelectableText(
+                          log,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.inkSecondary,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),
