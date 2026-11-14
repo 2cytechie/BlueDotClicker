@@ -19,6 +19,7 @@ import '../platform/screen_marker.dart';
 import '../services/media_tester.dart';
 import '../services/recognition.dart';
 import '../services/script_storage.dart';
+import '../services/template_storage.dart';
 import '../services/windows_recognition.dart';
 import 'frame_yield.dart';
 
@@ -59,6 +60,10 @@ final mediaTesterProvider = Provider<MediaTester>(
 );
 
 final scriptStorageProvider = Provider<ScriptStorage>((ref) => ScriptStorage());
+
+final templateStorageProvider = Provider<TemplateStorage>(
+  (ref) => TemplateStorage(),
+);
 
 final recordingStorageProvider = Provider<RecordingStorage>(
   (ref) => RecordingStorage(),
@@ -243,7 +248,9 @@ class CoordinatePickNotifier extends Notifier<CoordinatePickState> {
     _set(CoordinatePickState(target: target, cursor: null));
     final result = await _picker.pickPoint(
       onCursorMove: (pos) {
-        if (state.active) _set(CoordinatePickState(target: target, cursor: pos));
+        if (state.active) {
+          _set(CoordinatePickState(target: target, cursor: pos));
+        }
       },
     );
     // 拾取期间节点可能已被删除/切换
@@ -271,7 +278,9 @@ class CoordinatePickNotifier extends Notifier<CoordinatePickState> {
   }
 }
 
-final coordinatePickerProvider = Provider<CoordinatePicker>((ref) => CoordinatePicker());
+final coordinatePickerProvider = Provider<CoordinatePicker>(
+  (ref) => CoordinatePicker(),
+);
 
 final coordinatePickProvider =
     NotifierProvider<CoordinatePickNotifier, CoordinatePickState>(
@@ -646,8 +655,9 @@ class KeyPickNotifier extends Notifier<KeyPickState> {
 
 final keyPickerProvider = Provider<KeyPicker>((ref) => KeyPicker());
 
-final keyPickProvider =
-    NotifierProvider<KeyPickNotifier, KeyPickState>(KeyPickNotifier.new);
+final keyPickProvider = NotifierProvider<KeyPickNotifier, KeyPickState>(
+  KeyPickNotifier.new,
+);
 
 // ---- 蓝图运行状态 ----
 
@@ -815,7 +825,11 @@ class RunnerNotifier extends Notifier<RunnerState> {
     final logs = _pendingLogs.isEmpty ? state.logs : _mergeLogs();
     final node = _nodeDirty ? _pendingNodeId : state.currentNodeId;
     _nodeDirty = false;
-    state = RunnerState(running: state.running, currentNodeId: node, logs: logs);
+    state = RunnerState(
+      running: state.running,
+      currentNodeId: node,
+      logs: logs,
+    );
   }
 
   /// 合并缓冲日志并保留最近 500 条；重复消息只出一行并标注次数

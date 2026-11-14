@@ -28,7 +28,8 @@ fl.NodePort _toFlPort(PortDef p) {
           kind: isExec ? fl.PortKind.control : fl.PortKind.data,
           dataType: p.dataType,
           color: _portColor(p),
-          maxConnections: isExec ? 1 : (p.dir == PortDir.input ? 1 : null),
+          // 执行流允许多个分支汇入；数据输入仍只有一个明确的数据源。
+          maxConnections: isExec ? null : 1,
         )
       : fl.NodePort.output(
           id: p.key,
@@ -158,7 +159,7 @@ BlueprintScript graphToBlueprint(
   return script;
 }
 
-/// 连线校验：执行流输出口仅允许一条出边。
+/// 连线校验：执行流输入口允许分支汇合，输出口仅允许一条出边。
 ///
 /// 引擎沿首条执行流边走（其余边被静默忽略），必须在源头拒绝，
 /// 防止用户画出"看似并行、实则丢分支"的图；数据端口不受此限。

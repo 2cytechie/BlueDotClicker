@@ -14,7 +14,11 @@ void main() {
   setUp(() {
     controller = fl.NodeEditorController(definitions: blueprintNodeRegistry);
     controller.addNode(
-      blueprintNodeRegistry.instantiate('mouse', id: 'n1', position: Offset.zero),
+      blueprintNodeRegistry.instantiate(
+        'mouse',
+        id: 'n1',
+        position: Offset.zero,
+      ),
     );
     controller.selection.selectNode('n1');
   });
@@ -23,15 +27,19 @@ void main() {
     controller.dispose();
   });
 
-  Future<void> pumpPanel(WidgetTester tester, {ProviderContainer? container}) async {
-    await tester.pumpWidget(UncontrolledProviderScope(
-      container: container ?? ProviderContainer(),
-      child: MaterialApp(
-        home: Scaffold(
-          body: PropertyPanel(controller: controller),
+  Future<void> pumpPanel(
+    WidgetTester tester, {
+    ProviderContainer? container,
+  }) async {
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container ?? ProviderContainer(),
+        child: MaterialApp(
+          theme: buildAppTheme(),
+          home: Scaffold(body: PropertyPanel(controller: controller)),
         ),
       ),
-    ));
+    );
     await tester.pumpAndSettle();
   }
 
@@ -68,8 +76,11 @@ void main() {
       // 关键断言：修复前每键一条撤销记录，undo 一次只回退一个字符（1001234）；
       // 修复后整段输入是一条记录，一次 undo 回到初始值 100
       controller.history.undo();
-      expect(controller.graph.nodes['n1']!.data['x'], 100,
-          reason: '一次 undo 应回退整段输入，而不是单个字符');
+      expect(
+        controller.graph.nodes['n1']!.data['x'],
+        100,
+        reason: '一次 undo 应回退整段输入，而不是单个字符',
+      );
       // 文本同步回显（x/y 默认值均为 100）
       await tester.pump();
       expect(find.text('100'), findsNWidgets(2));
@@ -97,7 +108,10 @@ void main() {
       expect(find.text('100'), findsNWidgets(2));
 
       // 模拟坐标拾取写回：controller.updateNode 直接改数据
-      controller.updateNode('n1', (n) => n.withData(const {'x': 640, 'y': 360}));
+      controller.updateNode(
+        'n1',
+        (n) => n.withData(const {'x': 640, 'y': 360}),
+      );
       await tester.pumpAndSettle();
 
       expect(controller.graph.nodes['n1']!.data['x'], 640);
@@ -123,9 +137,7 @@ void main() {
       final actionY = tester.getTopLeft(find.text('动作')).dy;
       final buttonY = tester.getTopLeft(find.text('鼠标键')).dy;
       // 「X 坐标」也是端口说明区的端口名，用 TextField 精确取参数输入框位置
-      final xY = tester
-          .getTopLeft(find.widgetWithText(TextField, 'X 坐标'))
-          .dy;
+      final xY = tester.getTopLeft(find.widgetWithText(TextField, 'X 坐标')).dy;
       expect(actionY, lessThan(buttonY));
       expect(buttonY, lessThan(xY));
     });
@@ -145,10 +157,7 @@ void main() {
     });
 
     testWidgets('拖拽：起点/终点各一组按钮，方向模式只保留起点', (tester) async {
-      controller.updateNode(
-        'n1',
-        (n) => n.withData(const {'action': 'swipe'}),
-      );
+      controller.updateNode('n1', (n) => n.withData(const {'action': 'swipe'}));
       await pumpPanel(tester);
       expect(find.text('拾取坐标'), findsNWidgets(2));
       expect(find.text('屏幕定位'), findsNWidgets(2));
@@ -233,7 +242,9 @@ void main() {
       await pumpPanel(tester);
 
       final dropdowns = tester
-          .widgetList<DropdownButton<String>>(find.byType(DropdownButton<String>))
+          .widgetList<DropdownButton<String>>(
+            find.byType(DropdownButton<String>),
+          )
           .toList();
       expect(dropdowns.length, 2); // 动作 + 鼠标键
       for (final d in dropdowns) {
@@ -304,10 +315,7 @@ void main() {
       );
       expect(find.text('输入'), findsOneWidget);
       expect(find.text('输出'), findsOneWidget);
-      expect(
-        find.text('截取的屏幕图像，可连接「文字识别/图像识别」的图像输入'),
-        findsOneWidget,
-      );
+      expect(find.text('截取的屏幕图像，可连接「文字识别/图像识别」的图像输入'), findsOneWidget);
       // 两角点区域输入说明
       expect(find.textContaining('仅勾选「仅指定区域」时生效'), findsWidgets);
     });
@@ -333,10 +341,7 @@ void main() {
           position: const Offset(0, 300),
         ),
       );
-      controller.connect(
-        fl.PortRef(id, 'valueOut'),
-        fl.PortRef('n1', port),
-      );
+      controller.connect(fl.PortRef(id, 'valueOut'), fl.PortRef('n1', port));
     }
 
     testWidgets('X 输入已连接：X 坐标禁用并加锁图标，Y 坐标不受影响', (tester) async {
@@ -344,8 +349,7 @@ void main() {
       await pumpPanel(tester);
 
       expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
-      expect(find.text('X 坐标（锁定）'), findsNothing,
-          reason: '锁定态只显示锁图标，不再改写标签文字');
+      expect(find.text('X 坐标（锁定）'), findsNothing, reason: '锁定态只显示锁图标，不再改写标签文字');
       final xField = tester.widget<TextField>(
         find.widgetWithText(TextField, 'X 坐标'),
       );
@@ -385,17 +389,14 @@ void main() {
       connectSource('x');
       await pumpPanel(tester);
 
-      final locked = tester.getRect(
-        find.widgetWithText(TextField, 'X 坐标'),
-      );
+      final locked = tester.getRect(find.widgetWithText(TextField, 'X 坐标'));
       final editable = tester.getRect(find.widgetWithText(TextField, 'Y 坐标'));
       expect(
         locked.height,
         editable.height,
         reason: '锁定不应把输入框撑高（suffixIcon 默认 48×48 约束所致）',
       );
-      expect(find.text('-809'), findsOneWidget,
-          reason: '锁定只禁用编辑，参数原值保留并显示');
+      expect(find.text('-809'), findsOneWidget, reason: '锁定只禁用编辑，参数原值保留并显示');
     });
 
     testWidgets('解除连接后参数恢复可编辑并保留原值', (tester) async {
@@ -430,11 +431,19 @@ void main() {
       container.read(currentScriptProvider.notifier).open(script);
       // 下拉来源二：图中 varName 参数引用的变量
       controller.addNode(
-        blueprintNodeRegistry.instantiate('setVar', id: 'sv', position: Offset.zero),
+        blueprintNodeRegistry.instantiate(
+          'setVar',
+          id: 'sv',
+          position: Offset.zero,
+        ),
       );
       controller.updateNode('sv', (n) => n.withData({'name': 'score'}));
       controller.addNode(
-        blueprintNodeRegistry.instantiate('getVar', id: 'g1', position: Offset.zero),
+        blueprintNodeRegistry.instantiate(
+          'getVar',
+          id: 'g1',
+          position: Offset.zero,
+        ),
       );
       controller.selection.selectNode('g1');
       await pumpPanel(tester, container: container);
@@ -449,13 +458,20 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(controller.graph.nodes['g1']!.data['name'], 'hp');
-      expect(find.widgetWithText(TextField, 'hp'), findsOneWidget,
-          reason: '选择后输入框同步显示所选变量名');
+      expect(
+        find.widgetWithText(TextField, 'hp'),
+        findsOneWidget,
+        reason: '选择后输入框同步显示所选变量名',
+      );
     });
 
     testWidgets('数据保存：文件名字段带扩展名提示', (tester) async {
       controller.addNode(
-        blueprintNodeRegistry.instantiate('saveData', id: 'sd', position: Offset.zero),
+        blueprintNodeRegistry.instantiate(
+          'saveData',
+          id: 'sd',
+          position: Offset.zero,
+        ),
       );
       controller.selection.selectNode('sd');
       await pumpPanel(tester);
@@ -467,10 +483,17 @@ void main() {
 
     testWidgets('图像识别：选择图片整行显示文件名（文件不存在不显示预览）', (tester) async {
       controller.addNode(
-        blueprintNodeRegistry.instantiate('imageMatch', id: 'im1', position: Offset.zero),
+        blueprintNodeRegistry.instantiate(
+          'imageMatch',
+          id: 'im1',
+          position: Offset.zero,
+        ),
       );
       controller.selection.selectNode('im1');
-      controller.updateNode('im1', (n) => n.withData({'templatePath': 'C:/pics/target.png'}));
+      controller.updateNode(
+        'im1',
+        (n) => n.withData({'templatePath': 'C:/pics/target.png'}),
+      );
       await pumpPanel(tester);
 
       final btn = find.widgetWithText(OutlinedButton, 'target.png');
@@ -486,7 +509,11 @@ void main() {
   group('第五轮：识别文本输入锁定与文件名截断', () {
     testWidgets('文字识别：「目标文本」连接输入后锁定并保留原值', (tester) async {
       controller.addNode(
-        blueprintNodeRegistry.instantiate('ocr', id: 'o1', position: Offset.zero),
+        blueprintNodeRegistry.instantiate(
+          'ocr',
+          id: 'o1',
+          position: Offset.zero,
+        ),
       );
       controller.selection.selectNode('o1');
       // 未连接：参数可编辑、无下拉箭头（string 类型无已有变量建议）
@@ -501,7 +528,11 @@ void main() {
 
       // 连接上游数据 → 参数锁定只读
       controller.addNode(
-        blueprintNodeRegistry.instantiate('setVar', id: 'src', position: const Offset(0, 300)),
+        blueprintNodeRegistry.instantiate(
+          'setVar',
+          id: 'src',
+          position: const Offset(0, 300),
+        ),
       );
       final connId = controller.connect(
         fl.PortRef('src', 'valueOut'),
@@ -515,22 +546,31 @@ void main() {
       );
       expect(locked.enabled, isFalse);
       expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
-      expect(find.text('目标文本（锁定）'), findsNothing,
-          reason: '锁定态只显示锁图标，不再改写标签文字');
+      expect(find.text('目标文本（锁定）'), findsNothing, reason: '锁定态只显示锁图标，不再改写标签文字');
     });
 
     testWidgets('图像识别：超长文件名中段截断并保留扩展名，Tooltip 显示完整路径', (tester) async {
       controller.addNode(
-        blueprintNodeRegistry.instantiate('imageMatch', id: 'im1', position: Offset.zero),
+        blueprintNodeRegistry.instantiate(
+          'imageMatch',
+          id: 'im1',
+          position: Offset.zero,
+        ),
       );
       controller.selection.selectNode('im1');
       const longName = '屏幕截图_2026年11月08日_100021_windows.png';
-      controller.updateNode('im1', (n) => n.withData({'templatePath': 'C:/pics/$longName'}));
+      controller.updateNode(
+        'im1',
+        (n) => n.withData({'templatePath': 'C:/pics/$longName'}),
+      );
       await pumpPanel(tester);
 
       // 按钮文本保留头部 + 省略号 + 扩展名（而不是「屏幕…」丢掉类型信息）
-      expect(find.text('屏幕截图_2026年….png'), findsOneWidget,
-          reason: '长文件名应中段截断并保留 .png 扩展名');
+      expect(
+        find.text('屏幕截图_2026年….png'),
+        findsOneWidget,
+        reason: '长文件名应中段截断并保留 .png 扩展名',
+      );
       // 悬浮提示显示完整路径
       expect(find.byTooltip('C:/pics/$longName'), findsOneWidget);
     });
@@ -539,10 +579,18 @@ void main() {
   group('图像优先：连接输入图像后锁定区域', () {
     testWidgets('识别节点连接 image 输入：区域字段锁定、框选按钮关闭并给出提示', (tester) async {
       controller.addNode(
-        blueprintNodeRegistry.instantiate('screenshot', id: 'shot', position: const Offset(0, 300)),
+        blueprintNodeRegistry.instantiate(
+          'screenshot',
+          id: 'shot',
+          position: const Offset(0, 300),
+        ),
       );
       controller.addNode(
-        blueprintNodeRegistry.instantiate('ocr', id: 'ocr1', position: Offset.zero),
+        blueprintNodeRegistry.instantiate(
+          'ocr',
+          id: 'ocr1',
+          position: Offset.zero,
+        ),
       );
       controller.connect(
         fl.PortRef('shot', 'imageOut'),
@@ -551,10 +599,7 @@ void main() {
       controller.selection.selectNode('ocr1');
       await pumpPanel(tester);
 
-      expect(
-        find.text('已连接「输入图像」：识别范围就是该图像整体，区域设置不生效'),
-        findsOneWidget,
-      );
+      expect(find.text('已连接「输入图像」：识别范围就是该图像整体，区域设置不生效'), findsOneWidget);
       final leftField = tester.widget<TextField>(
         find.widgetWithText(TextField, '左上角X'),
       );
@@ -568,7 +613,11 @@ void main() {
 
     testWidgets('未连接 image 输入：区域字段保持可编辑，框选按钮可见', (tester) async {
       controller.addNode(
-        blueprintNodeRegistry.instantiate('ocr', id: 'ocr2', position: Offset.zero),
+        blueprintNodeRegistry.instantiate(
+          'ocr',
+          id: 'ocr2',
+          position: Offset.zero,
+        ),
       );
       controller.selection.selectNode('ocr2');
       await pumpPanel(tester);
@@ -584,10 +633,18 @@ void main() {
   group('截图区域坐标接数据边', () {
     testWidgets('任一坐标连线：仅指定区域开关自动开启并锁定', (tester) async {
       controller.addNode(
-        blueprintNodeRegistry.instantiate('setVar', id: 'src1', position: const Offset(0, 300)),
+        blueprintNodeRegistry.instantiate(
+          'setVar',
+          id: 'src1',
+          position: const Offset(0, 300),
+        ),
       );
       controller.addNode(
-        blueprintNodeRegistry.instantiate('screenshot', id: 'shot', position: Offset.zero),
+        blueprintNodeRegistry.instantiate(
+          'screenshot',
+          id: 'shot',
+          position: Offset.zero,
+        ),
       );
       controller.connect(
         fl.PortRef('src1', 'valueOut'),
@@ -596,10 +653,7 @@ void main() {
       controller.selection.selectNode('shot');
       await pumpPanel(tester);
 
-      expect(
-        find.text('区域坐标已由数据输入接管：已自动开启并锁定「仅指定区域」'),
-        findsOneWidget,
-      );
+      expect(find.text('区域坐标已由数据输入接管：已自动开启并锁定「仅指定区域」'), findsOneWidget);
       final regionSwitch = tester.widget<SwitchListTile>(
         find.widgetWithText(SwitchListTile, '仅指定区域'),
       );
@@ -618,7 +672,11 @@ void main() {
 
     testWidgets('未连接坐标输入：开关可自由切换，无接管提示', (tester) async {
       controller.addNode(
-        blueprintNodeRegistry.instantiate('screenshot', id: 'shot2', position: Offset.zero),
+        blueprintNodeRegistry.instantiate(
+          'screenshot',
+          id: 'shot2',
+          position: Offset.zero,
+        ),
       );
       controller.selection.selectNode('shot2');
       await pumpPanel(tester);
@@ -627,10 +685,7 @@ void main() {
         find.widgetWithText(SwitchListTile, '仅指定区域'),
       );
       expect(regionSwitch.onChanged, isNotNull);
-      expect(
-        find.text('区域坐标已由数据输入接管：已自动开启并锁定「仅指定区域」'),
-        findsNothing,
-      );
+      expect(find.text('区域坐标已由数据输入接管：已自动开启并锁定「仅指定区域」'), findsNothing);
     });
   });
 }

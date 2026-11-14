@@ -18,6 +18,70 @@ import '../../state/frame_yield.dart';
 import '../../state/providers.dart';
 import 'node_bridge.dart' show graphToBlueprint, graphVarNames;
 
+const _paramTextStyle = TextStyle(
+  fontFamily: kAppFontFamily,
+  fontSize: 13,
+  height: 1.3,
+  color: AppColors.ink,
+);
+
+/// 单行字段共用实际边框高度，以锁定框的 32px 图标槽为下限。
+InputDecoration _paramDecoration(
+  BuildContext context, {
+  required String label,
+  String? hint,
+  bool dropdown = false,
+}) {
+  final painter = TextPainter(
+    text: TextSpan(
+      text: '变量 Ag',
+      style: DefaultTextStyle.of(context).style.merge(_paramTextStyle),
+    ),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+    maxLines: 1,
+  )..layout();
+  final textHeight = painter.height;
+  final height = math.max(44.0, textHeight + 26).ceilToDouble();
+  final densityOffset = Theme.of(context).visualDensity.baseSizeAdjustment.dy;
+  final containerHeight = math
+      .max(32.0, textHeight + 16 + densityOffset)
+      .ceilToDouble();
+  painter.dispose();
+  // DropdownButton 的紧凑内容至少 24px，普通文本则采用实际行高。
+  final verticalPadding = dropdown
+      ? math.max(
+          0.0,
+          (containerHeight -
+                  math.max(
+                    math.max(24.0, textHeight),
+                    MediaQuery.textScalerOf(context).scale(13 * 1.3),
+                  ) -
+                  densityOffset) /
+              2,
+        )
+      : 8.0;
+  return InputDecoration(
+    labelText: label,
+    hintText: hint,
+    hintStyle: _paramTextStyle.copyWith(color: AppColors.inkMuted),
+    isDense: true,
+    contentPadding: EdgeInsets.symmetric(
+      horizontal: 12,
+      vertical: verticalPadding,
+    ),
+    constraints: BoxConstraints.tightFor(height: height),
+    // InputDecorator 会放松外层最小高度再绘制边框。给所有字段相同的
+    // 不可见高度基准，避免只有锁图标/下拉按钮撑高边框；12px 保留原左边距。
+    prefixIcon: const SizedBox.shrink(),
+    prefixIconConstraints: BoxConstraints.tightFor(
+      width: 12,
+      height: containerHeight,
+    ),
+    suffixIconConstraints: const BoxConstraints.tightFor(width: 32, height: 32),
+  );
+}
+
 /// 属性面板：编辑当前选中节点的参数（数据存储于 GraphNode.data，
 /// 经 NodeEditorController.updateNode 提交，支持撤销/重做）
 class PropertyPanel extends ConsumerWidget {
@@ -163,12 +227,22 @@ class PropertyPanel extends ConsumerWidget {
     final imageInputConnected = _hasDataInput(node, 'image');
     // 截图节点：任一区域坐标（左/上/右/下）接了数据边 → 区域由数据驱动，
     // 「仅指定区域」强制开启并锁定，避免出现「坐标有连线但开关被关掉」的静默忽略
-    final regionDrivenByData = const ['left', 'top', 'right', 'bottom']
-        .any((p) => _hasDataInput(node, p));
+    final regionDrivenByData = const [
+      'left',
+      'top',
+      'right',
+      'bottom',
+    ].any((p) => _hasDataInput(node, p));
     final lockedKeys = <String>{
       for (final f in def.params)
         if (_hasDataInput(node, f.lockedByPort ?? f.key)) f.key,
-      if (imageInputConnected) ...const ['useRegion', 'left', 'top', 'right', 'bottom'],
+      if (imageInputConnected) ...const [
+        'useRegion',
+        'left',
+        'top',
+        'right',
+        'bottom',
+      ],
       if (regionDrivenByData) 'useRegion',
     };
     // 媒体节点区域可通过屏幕框选获取：左上角 X/Y 行尾放框选按钮
@@ -241,8 +315,9 @@ class PropertyPanel extends ConsumerWidget {
           f,
           locked: lockedKeys.contains(f.key),
           // 区域由数据驱动时开关显示为开（实际执行也按区域截取）
-          boolValueOverride:
-              f.key == 'useRegion' && regionDrivenByData ? true : null,
+          boolValueOverride: f.key == 'useRegion' && regionDrivenByData
+              ? true
+              : null,
         ),
       );
       i += 1;
@@ -381,7 +456,13 @@ class PropertyPanel extends ConsumerWidget {
                 : null,
             dropdownColor: AppColors.moonWhite,
             borderRadius: kDropdownMenuRadius,
-            decoration: InputDecoration(labelText: f.label),
+            style: _paramTextStyle,
+            isExpanded: true,
+            decoration: _paramDecoration(
+              ref.context,
+              label: f.label,
+              dropdown: true,
+            ),
             items: [
               for (final o in f.options)
                 DropdownMenuItem(value: o.value, child: Text(o.label)),
@@ -392,7 +473,12 @@ class PropertyPanel extends ConsumerWidget {
           ),
         );
       case ParamType.templateFile:
-        return _TemplateFileField(node: node, field: f, onCommit: onCommit);
+        return _TemplateFileField(
+          key: ValueKey('${node.id}-${f.key}'),
+          node: node,
+          field: f,
+          onCommit: onCommit,
+        );
       case ParamType.recording:
         return _RecordingField(node: node, field: f, onCommit: onCommit);
       case ParamType.key:
@@ -1024,54 +1110,54 @@ class _ParamTextFieldState extends State<_ParamTextField> {
         keyboardType: widget.numberMode == _NumberMode.none
             ? null
             : TextInputType.number,
-        style: const TextStyle(fontSize: 13, color: AppColors.ink),
-        decoration: InputDecoration(
-          labelText: f.label,
-          // 锁定态只显示锁图标：图标已足够明确，不再改写标签文字
-          hintText: hint,
-          suffixIcon: widget.locked
-              ? const Icon(
-                  Icons.lock_outline_rounded,
-                  size: 16,
-                  color: AppColors.inkSecondary,
-                )
-              // varName 字段：尾部下拉箭头快速选择已有变量（也支持手动输入新变量名）
-              : suggestions != null && suggestions.isNotEmpty
-              ? PopupMenuButton<String>(
-                  icon: const Icon(
-                    Icons.arrow_drop_down_rounded,
-                    size: 22,
-                    color: AppColors.inkSecondary,
-                  ),
-                  tooltip: '选择已有变量',
-                  position: PopupMenuPosition.under,
-                  onSelected: (v) {
-                    _lastApplied = v;
-                    _controller.text = v;
-                    widget.onCommit(v);
-                  },
-                  itemBuilder: (_) => [
-                    for (final s in suggestions)
-                      PopupMenuItem(
-                        value: s,
-                        child: Text(
-                          s,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: AppColors.ink,
-                          ),
-                        ),
+        style: _paramTextStyle,
+        decoration: _paramDecoration(context, label: f.label, hint: hint)
+            .copyWith(
+              // 锁定态只显示锁图标：图标已足够明确，不再改写标签文字
+              suffixIcon: widget.locked
+                  ? const Icon(
+                      Icons.lock_outline_rounded,
+                      size: 16,
+                      color: AppColors.inkSecondary,
+                    )
+                  // varName 字段：尾部下拉箭头快速选择已有变量（也支持手动输入新变量名）
+                  : suggestions != null && suggestions.isNotEmpty
+                  ? PopupMenuButton<String>(
+                      padding: EdgeInsets.zero,
+                      style: IconButton.styleFrom(
+                        minimumSize: const Size(32, 32),
+                        maximumSize: const Size(32, 32),
+                        padding: EdgeInsets.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
-                  ],
-                )
-              : null,
-          // suffixIcon 默认约束为 48×48，会把锁定态输入框撑得更高；
-          // 收到小于文本行高即可，保证锁定前后输入框等高
-          suffixIconConstraints: const BoxConstraints(
-            minWidth: 32,
-            minHeight: 32,
-          ),
-        ),
+                      icon: const Icon(
+                        Icons.arrow_drop_down_rounded,
+                        size: 22,
+                        color: AppColors.inkSecondary,
+                      ),
+                      tooltip: '选择已有变量',
+                      position: PopupMenuPosition.under,
+                      onSelected: (v) {
+                        _lastApplied = v;
+                        _controller.text = v;
+                        widget.onCommit(v);
+                      },
+                      itemBuilder: (_) => [
+                        for (final s in suggestions)
+                          PopupMenuItem(
+                            value: s,
+                            child: Text(
+                              s,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: AppColors.ink,
+                              ),
+                            ),
+                          ),
+                      ],
+                    )
+                  : null,
+            ),
         onChanged: _onChanged,
       ),
     );
@@ -1116,12 +1202,17 @@ class _RecordingField extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               DropdownButtonFormField<String>(
+                key: ValueKey('${node.id}-${field.key}-$current-$exists'),
                 initialValue: exists ? current : null,
                 dropdownColor: AppColors.moonWhite,
                 borderRadius: kDropdownMenuRadius,
-                decoration: InputDecoration(
-                  labelText: field.label,
-                  hintText: items.isEmpty ? '暂无录制，请先到「录制与回放」页录制' : null,
+                style: _paramTextStyle,
+                isExpanded: true,
+                decoration: _paramDecoration(
+                  context,
+                  label: field.label,
+                  dropdown: true,
+                  hint: items.isEmpty ? '暂无录制，请先到「录制与回放」页录制' : null,
                 ),
                 items: [
                   for (final Recording r in items)
@@ -1192,9 +1283,12 @@ class _KeyField extends ConsumerWidget {
               dropdownColor: AppColors.moonWhite,
               borderRadius: kDropdownMenuRadius,
               isExpanded: true,
-              decoration: InputDecoration(
-                labelText: field.label,
-                hintText: '未设置（点右侧按钮拾取）',
+              style: _paramTextStyle,
+              decoration: _paramDecoration(
+                context,
+                label: field.label,
+                dropdown: true,
+                hint: '未设置（点右侧按钮拾取）',
               ),
               items: [
                 for (final (code, _) in options)
@@ -1303,9 +1397,12 @@ class _KeyListField extends ConsumerWidget {
             dropdownColor: AppColors.moonWhite,
             borderRadius: kDropdownMenuRadius,
             isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: '添加按键',
-              hintText: '选择要追加的键',
+            style: _paramTextStyle,
+            decoration: _paramDecoration(
+              context,
+              label: '添加按键',
+              dropdown: true,
+              hint: '选择要追加的键',
             ),
             items: [
               for (final (code, _) in addable)
@@ -1322,8 +1419,9 @@ class _KeyListField extends ConsumerWidget {
 }
 
 /// 模板图片字段：只读路径展示 + 文件选择按钮
-class _TemplateFileField extends StatelessWidget {
+class _TemplateFileField extends ConsumerStatefulWidget {
   const _TemplateFileField({
+    super.key,
     required this.node,
     required this.field,
     required this.onCommit,
@@ -1333,16 +1431,42 @@ class _TemplateFileField extends StatelessWidget {
   final ParamFieldDef field;
   final void Function(Object value) onCommit;
 
+  @override
+  ConsumerState<_TemplateFileField> createState() => _TemplateFileFieldState();
+}
+
+class _TemplateFileFieldState extends ConsumerState<_TemplateFileField> {
+  bool _busy = false;
+
   Future<void> _pick() async {
+    if (_busy) return;
+    final nodeId = widget.node.id;
+    final fieldKey = widget.field.key;
+    final storage = ref.read(templateStorageProvider);
+    setState(() => _busy = true);
     const group = XTypeGroup(
       label: '图片',
       extensions: ['png', 'jpg', 'jpeg', 'bmp'],
     );
-    final file = await openFile(
-      acceptedTypeGroups: [group],
-      confirmButtonText: '选择',
-    );
-    if (file != null) onCommit(file.path);
+    bool isCurrent() =>
+        mounted && widget.node.id == nodeId && widget.field.key == fieldKey;
+    try {
+      final file = await openFile(
+        acceptedTypeGroups: [group],
+        confirmButtonText: '选择',
+      );
+      if (file == null || !isCurrent()) return;
+      final path = await storage.importFile(file.path);
+      if (isCurrent()) widget.onCommit(path);
+    } catch (e) {
+      if (mounted && isCurrent()) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('图片保存失败：$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   /// 长文件名中段截断并保留扩展名（如「屏幕截图…png」），
@@ -1358,7 +1482,7 @@ class _TemplateFileField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final path = node.data[field.key] as String? ?? '';
+    final path = widget.node.data[widget.field.key] as String? ?? '';
     final name = path.isEmpty ? '' : path.replaceAll('\\', '/').split('/').last;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -1366,7 +1490,7 @@ class _TemplateFileField extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            field.label,
+            widget.field.label,
             style: const TextStyle(fontSize: 12, color: AppColors.inkSecondary),
           ),
           const SizedBox(height: 6),
@@ -1377,10 +1501,14 @@ class _TemplateFileField extends StatelessWidget {
             child: Tooltip(
               message: path,
               child: OutlinedButton.icon(
-                onPressed: _pick,
+                onPressed: _busy ? null : _pick,
                 icon: const Icon(Icons.image_outlined, size: 18),
                 label: Text(
-                  path.isEmpty ? '选择图片…' : _elideName(name),
+                  _busy
+                      ? '正在保存图片…'
+                      : path.isEmpty
+                      ? '选择图片…'
+                      : _elideName(name),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1610,7 +1738,9 @@ class _MediaTestSectionState extends ConsumerState<_MediaTestSection> {
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -1713,9 +1843,12 @@ class _MediaTestResultDialog extends StatelessWidget {
                 child: ListView(
                   shrinkWrap: true,
                   children: [
-                    for (final log in result.debugLogs.length > 10
-                        ? result.debugLogs.sublist(result.debugLogs.length - 10)
-                        : result.debugLogs)
+                    for (final log
+                        in result.debugLogs.length > 10
+                            ? result.debugLogs.sublist(
+                                result.debugLogs.length - 10,
+                              )
+                            : result.debugLogs)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 2),
                         child: SelectableText(

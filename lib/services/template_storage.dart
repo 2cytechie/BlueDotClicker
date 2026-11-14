@@ -34,6 +34,14 @@ class TemplateStorage {
   Future<String> pathFor(String hash, String ext) async =>
       '${await dirPath}${Platform.pathSeparator}$hash.$ext';
 
+  /// 将外部图片保存到应用模板目录；节点只在成功后引用返回的路径。
+  Future<String> importFile(String sourcePath) async {
+    final ext = extensionOf(sourcePath);
+    if (ext == null) throw const FormatException('不支持的图片格式');
+    final bytes = await File(sourcePath).readAsBytes();
+    return ensure(hash: sha256Hex(bytes), ext: ext, bytes: bytes);
+  }
+
   /// 写入模板（已存在则复用），返回绝对路径
   Future<String> ensure({
     required String hash,

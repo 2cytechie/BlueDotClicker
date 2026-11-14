@@ -82,11 +82,8 @@ void main() {
     return s;
   }
 
-  List<String> zipNames(Uint8List bytes) => ZipDecoder()
-      .decodeBytes(bytes)
-      .files
-      .map((f) => f.name)
-      .toList();
+  List<String> zipNames(Uint8List bytes) =>
+      ZipDecoder().decodeBytes(bytes).files.map((f) => f.name).toList();
 
   Uint8List makeZip(Map<String, List<int>> files) {
     final archive = Archive();
@@ -97,10 +94,7 @@ void main() {
   }
 
   List<File> allFiles(Directory dir) => dir.existsSync()
-      ? dir
-            .listSync(recursive: true)
-            .whereType<File>()
-            .toList()
+      ? dir.listSync(recursive: true).whereType<File>().toList()
       : const [];
 
   group('导出', () {
@@ -109,9 +103,7 @@ void main() {
       await recordings.save(makeRecording('r2'));
       await recordings.save(makeRecording('unused'));
 
-      final result = await pkg.build(
-        scriptWith(recordingIds: ['r1', 'r2']),
-      );
+      final result = await pkg.build(scriptWith(recordingIds: ['r1', 'r2']));
       final names = zipNames(result.bytes);
       expect(names, containsAll(['manifest.json', 'script.bpc.json']));
       expect(names, containsAll(['recordings/r1.json', 'recordings/r2.json']));
@@ -122,18 +114,19 @@ void main() {
     test('缺失录制进入缺失清单，zip 中不含该录制', () async {
       final result = await pkg.build(scriptWith(recordingIds: ['ghost']));
       expect(result.missing.recordings, ['ghost']);
-      expect(zipNames(result.bytes).any((n) => n.startsWith('recordings/')),
-          isFalse);
+      expect(
+        zipNames(result.bytes).any((n) => n.startsWith('recordings/')),
+        isFalse,
+      );
     });
 
     test('内容相同、路径不同的模板只打包一份', () async {
       final p1 = await writeTemplate('a.png', [1, 2, 3]);
       final p2 = await writeTemplate('b.png', [1, 2, 3]);
-      final result = await pkg.build(
-        scriptWith(templatePaths: [p1, p2]),
-      );
-      final templateEntries =
-          zipNames(result.bytes).where((n) => n.startsWith('templates/'));
+      final result = await pkg.build(scriptWith(templatePaths: [p1, p2]));
+      final templateEntries = zipNames(
+        result.bytes,
+      ).where((n) => n.startsWith('templates/'));
       expect(templateEntries.length, 1);
       expect(result.missing.isEmpty, isTrue);
     });
@@ -143,15 +136,19 @@ void main() {
         scriptWith(templatePaths: ['${tmp.path}/no-such.png']),
       );
       expect(result.missing.templates, hasLength(1));
-      expect(zipNames(result.bytes).any((n) => n.startsWith('templates/')),
-          isFalse);
+      expect(
+        zipNames(result.bytes).any((n) => n.startsWith('templates/')),
+        isFalse,
+      );
     });
   });
 
   group('导入', () {
     test('往返：空机器导入后录制可加载、模板指向本机目录', () async {
       await recordings.save(makeRecording('r1'));
-      final tplPath = await writeTemplate('tpl.png', [9, 8, 7]);
+      final original = await writeTemplate('tpl.png', [9, 8, 7]);
+      final tplPath = await templates.importFile(original);
+      await File(original).delete();
       final result = await pkg.build(
         scriptWith(recordingIds: ['r1'], templatePaths: [tplPath]),
       );
@@ -175,6 +172,7 @@ void main() {
       final path = s.nodes['im2']!.params['templatePath'] as String;
       expect(path.startsWith((await templates.dirPath)), isTrue);
       expect(File(path).existsSync(), isTrue);
+      expect(await File(path).readAsBytes(), [9, 8, 7]);
     });
 
     test('冲突复用：同 id 同 actions 不新增文件、引用不变', () async {
@@ -236,10 +234,7 @@ void main() {
         ),
         'templates/$wrongHash.png': [9, 9, 9],
       });
-      await expectLater(
-        pkg.importZip(zip),
-        throwsA(isA<PackageException>()),
-      );
+      await expectLater(pkg.importZip(zip), throwsA(isA<PackageException>()));
       expect(allFiles(tmp), isEmpty);
     });
 
@@ -250,10 +245,7 @@ void main() {
         ),
         '../evil.json': [1, 2],
       });
-      await expectLater(
-        pkg.importZip(zip),
-        throwsA(isA<PackageException>()),
-      );
+      await expectLater(pkg.importZip(zip), throwsA(isA<PackageException>()));
       expect(allFiles(tmp), isEmpty);
     });
 
@@ -281,17 +273,10 @@ void main() {
     test('缺少 script.bpc.json 整体失败', () async {
       final zip = makeZip({
         'manifest.json': utf8.encode(
-          jsonEncode({
-            'format': 'bpcpack',
-            'version': 1,
-            'type': 'script',
-          }),
+          jsonEncode({'format': 'bpcpack', 'version': 1, 'type': 'script'}),
         ),
       });
-      await expectLater(
-        pkg.importZip(zip),
-        throwsA(isA<PackageException>()),
-      );
+      await expectLater(pkg.importZip(zip), throwsA(isA<PackageException>()));
     });
 
     test('manifest 损坏整体失败', () async {
@@ -301,10 +286,7 @@ void main() {
           jsonEncode(BlueprintScript(name: 'bad-manifest').toJson()),
         ),
       });
-      await expectLater(
-        pkg.importZip(zip),
-        throwsA(isA<PackageException>()),
-      );
+      await expectLater(pkg.importZip(zip), throwsA(isA<PackageException>()));
     });
 
     test('条目数超限整体失败', () async {

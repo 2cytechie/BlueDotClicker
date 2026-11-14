@@ -176,7 +176,7 @@ void main() {
       );
     });
 
-    test('OCR 数据端口说明齐全，x/y 描述目标文字坐标', () {
+    test('OCR 数据端口说明齐全，x/y 描述命中区域中心', () {
       final def = nodeDef('ocr');
       final notes = [
         ...def.inputs.where((p) => p.note != null),
@@ -196,8 +196,8 @@ void main() {
       );
       final x = def.outputs.firstWhere((p) => p.key == 'x');
       final y = def.outputs.firstWhere((p) => p.key == 'y');
-      expect(x.note, contains('目标文字中心'));
-      expect(y.note, contains('目标文字中心'));
+      expect(x.note, contains('命中区域中心'));
+      expect(y.note, contains('命中区域中心'));
     });
 
     test('图像识别数据端口说明 5 条，x/y 描述命中中心', () {
@@ -211,7 +211,7 @@ void main() {
       final y = def.outputs.firstWhere((p) => p.key == 'y');
       expect(x.note, contains('中心'));
       expect(y.note, contains('中心'));
-      expect(x.note, contains('区域偏移'));
+      expect(x.note, contains('未命中'));
     });
   });
 
@@ -266,15 +266,16 @@ void main() {
       expect(input.note, isNotNull, reason: '输入端口带用法说明');
     });
 
-    test('OCR 数据输出为 文本/是否命中/坐标X/坐标Y', () {
+    test('OCR 数据输出为 是否命中/坐标X/坐标Y/文本', () {
       final def = nodeDef('ocr');
       final dataOuts = def.outputs.where((p) => p.kind == PortKind.data).toList();
-      expect(dataOuts.map((p) => p.key), ['text', 'found', 'x', 'y']);
-      final found = dataOuts[1];
+      expect(dataOuts.map((p) => p.key), ['found', 'x', 'y', 'text']);
+      final found = dataOuts[0];
       expect(found.label, '是否命中');
       expect(found.note, contains('目标文本'));
-      expect(dataOuts[2].label, '坐标X');
-      expect(dataOuts[3].label, '坐标Y');
+      expect(dataOuts[1].label, '坐标X');
+      expect(dataOuts[2].label, '坐标Y');
+      expect(dataOuts[3].label, '文本');
     });
 
     test('imageMatch：模板/阈值 + 两角点区域参数，输出含相似度', () {

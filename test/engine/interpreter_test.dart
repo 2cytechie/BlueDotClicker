@@ -429,7 +429,7 @@ void main() {
       );
       expect(auto.calls.any((c) => c.startsWith('longPress')), isTrue,
           reason: '达到安全阀后走假出口');
-      expect(hooks.logs.join(), contains('循环达到最大次数 2，强制结束'));
+      expect(hooks.logs.join(), contains('达到最大次数 2，强制结束'));
     });
 
     test('条件循环：首轮常量兜底，数据边更新后正确退出', () async {
@@ -492,8 +492,10 @@ void main() {
       expect(vars['count'], 3, reason: '真出口链自动循环 3 轮');
       expect(vars['done'], '完成', reason: '条件为假后走假出口执行一次');
       final loopLogs =
-          hooks.logs.where((l) => l.startsWith('循环:')).toList();
-      expect(loopLogs.length, 4, reason: '3 轮为真 + 1 轮为假');
+          hooks.logs.where((l) => l.startsWith('[循环]')).toList();
+      expect(loopLogs.length, 4,
+          reason: '每轮条件值不同（0/1/2/3），按「值变化时记录」全部保留');
+      expect(loopLogs.first, contains('真'));
       expect(loopLogs.last, contains('假'));
     });
 
@@ -1437,7 +1439,7 @@ void main() {
       await _run(s, auto: auto, hooks: hooks);
       expect(auto.calls, isEmpty);
       expect(
-        hooks.logs.where((l) => l.contains('鼠标操作失败：未知动作')).length,
+        hooks.logs.where((l) => l.contains('[鼠标] 未知动作')).length,
         2,
       );
       expect(hooks.logs.join(), contains('✓ 执行完成'));
@@ -1457,7 +1459,7 @@ void main() {
       await _run(s, auto: auto, hooks: hooks);
       expect(auto.calls, isEmpty);
       expect(
-        hooks.logs.where((l) => l.contains('键盘操作失败：未知动作')).length,
+        hooks.logs.where((l) => l.contains('[键盘] 未知动作')).length,
         2,
       );
       expect(hooks.logs.join(), contains('✓ 执行完成'));
@@ -1526,7 +1528,7 @@ void main() {
       expect(engine.vars['vy'], 140);
     });
 
-    test('未命中目标文本：found=false、x/y=-1 并记录日志', () async {
+    test('未命中目标文本：found=false、x/y=null 并记录日志', () async {
       final recognition = MockRecognition()
         ..ocrText = '开始 游戏'
         ..words = const [OcrWordBox('开始', 0, 0, 20, 10)];
@@ -1550,11 +1552,39 @@ void main() {
       );
       await engine.run(s);
       expect(engine.vars['vf'], false);
-      expect(engine.vars['vx'], -1);
-      expect(hooks.logs.join(), contains('OCR 未找到目标文本「不存在」'));
+      expect(engine.vars['vx'], '', reason: '坐标输出 null，setVar 兜底为空字符串');
+      expect(hooks.logs.join(), contains('[文字识别] 未找到目标「不存在」'));
+      expect(hooks.logs.join(), contains('坐标X=null'));
     });
 
-    test('空目标文本保持旧语义：found=识别非空、坐标=区域中心', () async {
+    test('未命中时坐标 null：下游鼠标动作被跳过并记录日志', () async {
+      final recognition = MockRecognition()
+        ..ocrText = '开始 游戏'
+        ..words = const [OcrWordBox('开始', 0, 0, 20, 10)];
+      final s = _build([
+        _node('a', 'start'),
+        _node('o', 'ocr', {'useRegion': false, 'targetText': '不存在'}),
+        _mouse('m', 'click', {'x': 10, 'y': 20}),
+      ], [
+        _edge('e1', 'a', 'out', 'o', 'in'),
+        _edge('e2', 'o', 'out', 'm', 'in'),
+        _edge('d1', 'o', 'x', 'm', 'x', kind: EdgeKind.data),
+        _edge('d2', 'o', 'y', 'm', 'y', kind: EdgeKind.data),
+      ]);
+      final auto = MockAutomation();
+      final hooks = Hooks();
+      final engine = BlueprintInterpreter(
+        automation: auto,
+        recognition: recognition,
+        hooks: hooks.engineHooks,
+      );
+      await engine.run(s);
+      expect(auto.calls.where((c) => c.startsWith('click')), isEmpty,
+          reason: '坐标输入为空时不得回退参数坐标执行点击');
+      expect(hooks.logs.join(), contains('跳过单击：X 坐标输入为空'));
+    });
+
+    test('空目标文本：found=识别非空，无词框时坐标回退区域中心', () async {
       final s = _build([
         _node('a', 'start'),
         _node('o', 'ocr', {
@@ -1641,7 +1671,7 @@ void main() {
       final hooks = Hooks();
       final vars = await _run(s, hooks: hooks);
       expect(vars['sum'], 0);
-      expect(hooks.logs.join(), contains('加法失败：A 不是数字'));
+      expect(hooks.logs.join(), contains('[加法] 失败：A 不是数字'));
     });
   });
 
@@ -1797,6 +1827,79 @@ void main() {
       final vars = await _run(s, auto: auto);
       // 全屏截图原点 -1920、Mock 图像 100×100 → 中心 = -1920 + 50
       expect(vars['x'], -1920 + 50);
+    });
+  });
+
+  group('运行日志去重', () {
+    test('同一节点多轮输出相同：只记录首次并汇总省略次数', () async {
+      final s = _build([
+        _node('a', 'start', {'count': 3}),
+        _node('shot', 'screenshot', {'useRegion': false}),
+      ], [
+        _edge('e1', 'a', 'out', 'shot', 'in'),
+      ]);
+      final hooks = Hooks();
+      await _run(s, hooks: hooks);
+
+      expect(hooks.logs.where((l) => l == '[截图] 成功').length, 1,
+          reason: '连续相同输出只保留首次');
+      expect(
+        hooks.logs.where((l) => l.contains('输出：图像=<图像 100×100>')).length,
+        1,
+      );
+      expect(hooks.logs.join(), contains('「截图」相同输出已省略 2 次'));
+    });
+
+    test('同一节点输出值变化时逐次记录', () async {
+      final s = _build([
+        _node('a', 'start', {'count': 3}),
+        _node('get', 'getVar', {'name': 'n'}),
+        _node('add', 'add', {'a': 0, 'b': 1}),
+        _node('set', 'setVar', {'name': 'n', 'const': ''}),
+      ], [
+        _edge('e1', 'a', 'out', 'add', 'in'),
+        _edge('e2', 'add', 'out', 'set', 'in'),
+        _edge('d1', 'get', 'value', 'add', 'a', kind: EdgeKind.data),
+        _edge('d2', 'add', 'result', 'set', 'value', kind: EdgeKind.data),
+      ]);
+      final hooks = Hooks();
+      final vars = await _run(s, hooks: hooks);
+
+      expect(vars['n'], 2, reason: '前两轮累加：0+1、1+1');
+      expect(hooks.logs.where((l) => l.startsWith('[加法]')).length, 3,
+          reason: '每轮操作数不同，签名变化时逐次记录');
+      expect(hooks.logs.join(), isNot(contains('相同输出已省略')));
+    });
+
+    test('无数据输出的节点连续相同动作只记录一次', () async {
+      final s = _build([
+        _node('a', 'start', {'count': 3}),
+        _mouse('m', 'click', {'x': 10, 'y': 20}),
+      ], [
+        _edge('e1', 'a', 'out', 'm', 'in'),
+      ]);
+      final hooks = Hooks();
+      await _run(s, hooks: hooks);
+
+      expect(hooks.logs.where((l) => l == '[鼠标] 单击 (10, 20)').length, 1);
+      expect(hooks.logs.join(), contains('相同输出已省略 2 次'));
+    });
+
+    test('错误日志不参与去重：每次执行都输出', () async {
+      final s = _build([
+        _node('a', 'start', {'count': 3}),
+        _mouse('m', 'press', {'x': 1, 'y': 1}),
+      ], [
+        _edge('e1', 'a', 'out', 'm', 'in'),
+      ]);
+      final hooks = Hooks();
+      await _run(s, hooks: hooks);
+
+      expect(
+        hooks.logs.where((l) => l.contains('[鼠标] 未知动作')).length,
+        3,
+        reason: '错误始终输出，不因重复而被省略',
+      );
     });
   });
 }

@@ -260,20 +260,17 @@ void main() {
       expect(c.graph.connections.length, 2);
     });
 
-    test('执行流输入口第二条入边被拒（maxConnections 既有约束）', () {
+    test('条件判断的两个出口可汇入同一个执行输入口', () {
       final c = controller();
       expect(
-        c.connect(const fl.PortRef('st', 'out'), const fl.PortRef('a', 'in')),
+        c.connect(const fl.PortRef('c1', 'true'), const fl.PortRef('a', 'in')),
         isNotNull,
       );
-      c.addNodes([
-        blueprintNodeRegistry.instantiate('start', id: 'st2', position: Offset.zero),
-      ]);
-      // a 的入边已占满（maxConnections: 1）——再连第二个开始节点应被拒
       expect(
-        c.connect(const fl.PortRef('st2', 'out'), const fl.PortRef('a', 'in')),
-        isNull,
+        c.connect(const fl.PortRef('c1', 'false'), const fl.PortRef('a', 'in')),
+        isNotNull,
       );
+      expect(c.graph.connections.length, 2);
     });
 
     test('不同执行流出口可各连一条', () {

@@ -538,15 +538,23 @@ final List<NodeTypeDef> kNodeTypes = [
       _inData(
         'targetText',
         '目标文本',
-        note: '可选。连接后「目标文本」参数锁定；识别文本包含该文本时「是否命中」为 true，坐标输出为目标文字中心。',
+        note: '可选。连接后「目标文本」参数锁定；识别文本包含该文本时「是否命中」为 true，坐标输出为命中文字区域中心。',
       ),
     ],
     outputs: [
       _outExec(),
+      _outData('found', '是否命中', note: '目标文本为空时 = 识别文本非空；填写目标文本时 = 识别文本是否包含目标'),
+      _outData(
+        'x',
+        '坐标X',
+        note: '命中区域中心在屏幕上的 X 坐标：指定目标时为命中文字包围盒中心，未指定时为识别文本整体包围盒中心；未识别到内容或未命中时为 null',
+      ),
+      _outData(
+        'y',
+        '坐标Y',
+        note: '命中区域中心在屏幕上的 Y 坐标：指定目标时为命中文字包围盒中心，未指定时为识别文本整体包围盒中心；未识别到内容或未命中时为 null',
+      ),
       _outData('text', '文本', note: '识别出的完整文本（字符串），可连接下游节点的数据输入'),
-      _outData('found', '是否命中', note: '识别文本是否包含「目标文本」；目标文本为空时 = 识别文本非空'),
-      _outData('x', '坐标X', note: '目标文字中心 X；目标文本为空时为区域中心；未命中目标时为 -1'),
-      _outData('y', '坐标Y', note: '目标文字中心 Y；目标文本为空时为区域中心；未命中目标时为 -1'),
     ],
     params: [
       ..._cornerFields,
@@ -555,7 +563,7 @@ final List<NodeTypeDef> kNodeTypes = [
         '目标文本',
         ParamType.string,
         defaultValue: '',
-        hint: '留空 = 任意文本模式（坐标为区域中心）',
+        hint: '留空 = 任意文本模式（坐标为识别文本整体中心）',
       ),
     ],
   ),
@@ -579,8 +587,8 @@ final List<NodeTypeDef> kNodeTypes = [
     outputs: [
       _outExec(),
       _outData('found', '是否命中', note: '是否命中（true/false），可连接「条件判断」节点的数据输入'),
-      _outData('x', '坐标X', note: '命中区域中心在屏幕上的 X 坐标（未命中时为最佳匹配位置；区域模式时含区域偏移）'),
-      _outData('y', '坐标Y', note: '命中区域中心在屏幕上的 Y 坐标（未命中时为最佳匹配位置；区域模式时含区域偏移）'),
+      _outData('x', '坐标X', note: '命中区域中心在屏幕上的 X 坐标；未命中或识别失败时为 null'),
+      _outData('y', '坐标Y', note: '命中区域中心在屏幕上的 Y 坐标；未命中或识别失败时为 null'),
       _outData('score', '相似度', note: '相似度得分（0.0~1.0，越接近 1 越相似）'),
     ],
     params: [
