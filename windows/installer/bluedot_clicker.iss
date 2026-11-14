@@ -3,7 +3,7 @@
 ; 版本号与 pubspec.yaml 中的 version 保持一致
 
 #define MyAppName "蓝点器"
-#define MyAppVersion "26.11.10"
+#define MyAppVersion "26.11.14"
 #define MyAppPublisher "蓝点器"
 #define MyAppExeName "bluedot_clicker.exe"
 #define ReleaseDir "..\..\build\windows\x64\runner\Release"

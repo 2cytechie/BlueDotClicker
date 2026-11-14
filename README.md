@@ -5,7 +5,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078D6)
 ![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
-![Version](https://img.shields.io/badge/version-26.11.10-green)
+![Version](https://img.shields.io/badge/version-26.11.14-green)
 
 [下载安装](#下载与安装) · [功能特性](#功能特性) · [快速开始](#快速开始) · [节点手册](#节点手册) · [已知问题](#已知问题与排查) · [开发与构建](#开发与构建) · [致谢](#第三方组件与致谢) · [许可证](#许可证)
 
@@ -53,7 +53,7 @@
 **[前往 GitHub Releases 下载最新安装包 →](https://github.com/2cytechie/BlueDotClicker/releases)**
 
 - 安装包命名：`BlueDotClicker-Setup-<版本号>.exe`
-- 当前版本：`26.11.10`
+- 当前版本：`26.11.14`
 - 历史版本同样在 Releases 页面查看。
 
 ### 系统要求
